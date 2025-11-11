@@ -1,0 +1,14 @@
+# Core dependencies for pill counting system
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# Bayesian optimization (for optimize_temporal_bayesian.py)
+scikit-optimize>=0.9.0
+
+# Machine learning utilities (for utility scripts)
+scikit-learn>=1.3.0
+scipy>=1.10.0
+
+# Deep learning (for patch classification in utility/)
+tensorflow>=2.13.0
+
