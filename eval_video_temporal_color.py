@@ -1,7 +1,8 @@
-# eval_video_temporal.py
+# eval_video_temporal_color.py
 """
-Single video evaluator with temporal tracking.
+Single video evaluator with temporal tracking and HSV color matching.
 Processes a video and outputs duration-based accuracy percentage.
+Uses HSV color masking to filter detections by pill color.
 """
 import cv2
 import json
@@ -70,6 +71,86 @@ def preprocess_frame(frame_bgr, pre):
         k = pre["blur"] + (1 - pre["blur"] % 2)
         gray = cv2.GaussianBlur(gray, (k, k), 0)
     return img, gray
+
+# ---------- HSV Color Masking Functions ----------
+def create_color_mask(warped_bgr, target_color_hsv, hue_tolerance=10, sat_range=(50, 255), val_range=(50, 255)):
+    """
+    Create a binary mask for specific color range in HSV space.
+    
+    Args:
+        warped_bgr: Input BGR image
+        target_color_hsv: Target color in HSV [H, S, V] (0-180, 0-255, 0-255)
+        hue_tolerance: Hue tolerance in degrees (0-180)
+        sat_range: Saturation range tuple (min, max) (0-255)
+        val_range: Value (brightness) range tuple (min, max) (0-255)
+    
+    Returns:
+        Binary mask (255 = match, 0 = no match)
+    """
+    hsv = cv2.cvtColor(warped_bgr, cv2.COLOR_BGR2HSV)
+    
+    # Handle hue wrap-around (red is at both 0 and 180)
+    h_min = max(0, target_color_hsv[0] - hue_tolerance)
+    h_max = min(180, target_color_hsv[0] + hue_tolerance)
+    
+    # If hue range crosses 0/180 boundary, handle separately
+    if h_min < 0 or h_max > 180:
+        # For simplicity, clamp to valid range
+        h_min = max(0, h_min)
+        h_max = min(180, h_max)
+    
+    lower = np.array([h_min, sat_range[0], val_range[0]], dtype=np.uint8)
+    upper = np.array([h_max, sat_range[1], val_range[1]], dtype=np.uint8)
+    
+    # Create mask
+    mask = cv2.inRange(hsv, lower, upper)
+    
+    return mask
+
+def detect_with_color_mask(warped_bgr, gray_w, detector, cfg):
+    """
+    Detect pills using HSV color mask + blob detector.
+    
+    Args:
+        warped_bgr: Warped color image
+        gray_w: Warped grayscale image
+        detector: Blob detector
+        cfg: Configuration dictionary
+    
+    Returns:
+        keypoints: Detected keypoints
+        color_mask: Color mask used (for visualization)
+    """
+    blob_cfg = cfg.get("blob", {})
+    
+    # Check if color filtering is enabled
+    if not blob_cfg.get("use_color_filter", False):
+        # No color filtering, use standard detection
+        kps = detector.detect(gray_w)
+        return kps, None
+    
+    # Get color parameters
+    target_color_hsv = blob_cfg.get("target_color_hsv", [20, 200, 200])  # Default: orange
+    hue_tolerance = blob_cfg.get("hue_tolerance", 10)
+    sat_range = tuple(blob_cfg.get("sat_range", [50, 255]))
+    val_range = tuple(blob_cfg.get("val_range", [50, 255]))
+    
+    # Create color mask
+    color_mask = create_color_mask(
+        warped_bgr, 
+        target_color_hsv, 
+        hue_tolerance, 
+        sat_range, 
+        val_range
+    )
+    
+    # Apply mask to grayscale image (only detect in colored regions)
+    masked_gray = cv2.bitwise_and(gray_w, gray_w, mask=color_mask)
+    
+    # Detect blobs on masked image
+    kps = detector.detect(masked_gray)
+    
+    return kps, color_mask
 
 class TemporalPillTracker:
     """Tracks pill detections across multiple frames to stabilize counts."""
@@ -158,7 +239,13 @@ DEFAULTS = {
     "blob": {
         "min_area": 300, "max_area": 5000,
         "min_circ": 0.6, "min_conv": 0.7, "min_inertia": 0.2,
-        "min_thr": 10, "max_thr": 220, "thr_step": 10
+        "min_thr": 10, "max_thr": 220, "thr_step": 10,
+        # Color matching parameters
+        "use_color_filter": False,  # Enable/disable color filtering
+        "target_color_hsv": [19, 124, 101], # [30, 200, 200],  # Target color in HSV (default: orange)
+        "hue_tolerance": 20,  # Hue range: ±10 degrees
+        "sat_range": [50, 255],  # Saturation range
+        "val_range": [30, 255]  # Value (brightness) range
     },
     "temporal": {
         "enabled": True,
@@ -181,7 +268,7 @@ def load_settings(path):
 
 def evaluate_video_with_visualization(video_path, cfg, show_vis=True):
     """
-    Evaluate a single video with temporal tracking and optional visualization.
+    Evaluate a single video with temporal tracking, HSV color matching, and optional visualization.
     Returns duration ratio (frames with >= 8 pills / total frames) and statistics.
     """
     warp_w = cfg["warp"]["width"]
@@ -213,8 +300,16 @@ def evaluate_video_with_visualization(video_path, cfg, show_vis=True):
     frames_with_8_plus = 0
     count_history = []
     
+    blob_cfg = cfg.get("blob", {})
+    use_color = blob_cfg.get("use_color_filter", False)
+    
     print(f"Processing video: {video_path.name}")
     print(f"Temporal params: max_frames={max_frames}, cluster_dist={cluster_distance:.1f}, min_ratio={min_detection_ratio:.2f}")
+    if use_color:
+        target_hsv = blob_cfg.get("target_color_hsv", [20, 200, 200])
+        print(f"Color filtering: ENABLED (HSV={target_hsv}, hue_tol={blob_cfg.get('hue_tolerance', 10)})")
+    else:
+        print(f"Color filtering: DISABLED")
     
     while True:
         ok, frame = cap.read()
@@ -231,8 +326,8 @@ def evaluate_video_with_visualization(video_path, cfg, show_vis=True):
             k = cfg["preprocess"]["blur"] + (1 - cfg["preprocess"]["blur"] % 2)
             gray_w = cv2.GaussianBlur(gray_w, (k, k), 0)
         
-        # Detect
-        kps = detector.detect(gray_w)
+        # Detect with color masking
+        kps, color_mask = detect_with_color_mask(warped, gray_w, detector, cfg)
         tracker.add_frame(kps)
         stable_count = tracker.get_stable_count()
         current_count = len(kps)
@@ -245,7 +340,15 @@ def evaluate_video_with_visualization(video_path, cfg, show_vis=True):
         
         # Visualization
         if show_vis:
-            vis = cv2.drawKeypoints(warped, kps, None, (0,255,0), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+            vis = warped.copy()
+            
+            # Draw color mask overlay (semi-transparent)
+            if color_mask is not None:
+                mask_colored = cv2.applyColorMap(color_mask, cv2.COLORMAP_JET)
+                vis = cv2.addWeighted(vis, 0.7, mask_colored, 0.3, 0)
+            
+            # Draw detected keypoints
+            vis = cv2.drawKeypoints(vis, kps, None, (0,255,0), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
             
             # Color coding based on stable count
             if stable_count >= 8:
@@ -258,13 +361,18 @@ def evaluate_video_with_visualization(video_path, cfg, show_vis=True):
             count_text = f"stable={stable_count} (current={current_count})"
             cv2.putText(vis, count_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, count_color, 2)
             
+            # Show color filter status
+            if use_color:
+                color_status = f"Color filter: ON (HSV={blob_cfg.get('target_color_hsv')})"
+                cv2.putText(vis, color_status, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            
             # Show duration ratio
             if total_frames > 0:
                 duration_ratio = frames_with_8_plus / total_frames
                 ratio_text = f"Duration ratio: {duration_ratio:.1%}"
-                cv2.putText(vis, ratio_text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                cv2.putText(vis, ratio_text, (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             
-            cv2.imshow("Video Evaluation", vis)
+            cv2.imshow("Video Evaluation (Color)", vis)
             key = cv2.waitKey(1) & 0xFF
             if key in (27, ord('q')):
                 print("Evaluation stopped by user")
@@ -291,13 +399,14 @@ def evaluate_video_with_visualization(video_path, cfg, show_vis=True):
         "max_count": int(count_array.max()),
         "mean_count": float(count_array.mean()),
         "median_count": float(np.median(count_array)),
-        "std_count": float(count_array.std())
+        "std_count": float(count_array.std()),
+        "color_filter_enabled": use_color
     }
     
     return stats
 
 def main():
-    ap = argparse.ArgumentParser(description="Evaluate a single video with temporal tracking")
+    ap = argparse.ArgumentParser(description="Evaluate a single video with temporal tracking and HSV color matching")
     ap.add_argument("video", help="Path to video file")
     ap.add_argument("--settings", default="", help="JSON settings file")
     ap.add_argument("--temporal-params", default="", help="JSON file with temporal parameters (overrides settings)")
@@ -305,6 +414,17 @@ def main():
     ap.add_argument("--max-frames", type=int, default=None, help="Override max_frames")
     ap.add_argument("--cluster-distance", type=float, default=None, help="Override cluster_distance")
     ap.add_argument("--min-ratio", type=float, default=None, help="Override min_detection_ratio")
+    
+    # Color matching arguments
+    ap.add_argument("--enable-color", action="store_true", help="Enable HSV color filtering")
+    ap.add_argument("--target-color-bgr", nargs=3, type=int, default=None, 
+                    help="Target color in BGR format (e.g., 0 100 255 for orange)")
+    ap.add_argument("--target-color-hsv", nargs=3, type=int, default=None,
+                    help="Target color in HSV format (e.g., 20 200 200 for orange)")
+    ap.add_argument("--hue-tolerance", type=int, default=None, help="Hue tolerance in degrees (default: 10)")
+    ap.add_argument("--sat-range", nargs=2, type=int, default=None, help="Saturation range min max (default: 50 255)")
+    ap.add_argument("--val-range", nargs=2, type=int, default=None, help="Value range min max (default: 50 255)")
+    
     args = ap.parse_args()
     
     # Load settings
@@ -324,6 +444,29 @@ def main():
         cfg["temporal"]["cluster_distance"] = args.cluster_distance
     if args.min_ratio is not None:
         cfg["temporal"]["min_detection_ratio"] = args.min_ratio
+    
+    # Handle color matching arguments
+    if args.enable_color:
+        cfg["blob"]["use_color_filter"] = True
+    
+    if args.target_color_bgr:
+        # Convert BGR to HSV
+        bgr_color = np.uint8([[list(args.target_color_bgr)]])
+        hsv_color = cv2.cvtColor(bgr_color, cv2.COLOR_BGR2HSV)[0][0]
+        cfg["blob"]["target_color_hsv"] = [int(hsv_color[0]), int(hsv_color[1]), int(hsv_color[2])]
+        print(f"Converted BGR {args.target_color_bgr} to HSV {cfg['blob']['target_color_hsv']}")
+    
+    if args.target_color_hsv:
+        cfg["blob"]["target_color_hsv"] = list(args.target_color_hsv)
+    
+    if args.hue_tolerance is not None:
+        cfg["blob"]["hue_tolerance"] = args.hue_tolerance
+    
+    if args.sat_range:
+        cfg["blob"]["sat_range"] = list(args.sat_range)
+    
+    if args.val_range:
+        cfg["blob"]["val_range"] = list(args.val_range)
     
     video_path = Path(args.video)
     if not video_path.exists():
@@ -351,6 +494,12 @@ def main():
     print(f"  Mean: {stats['mean_count']:.2f}")
     print(f"  Median: {stats['median_count']:.2f}")
     print(f"  Std Dev: {stats['std_count']:.2f}")
+    if stats['color_filter_enabled']:
+        print(f"\nColor Filter: ENABLED")
+        print(f"  Target HSV: {cfg['blob']['target_color_hsv']}")
+        print(f"  Hue Tolerance: {cfg['blob']['hue_tolerance']}°")
+        print(f"  Saturation Range: {cfg['blob']['sat_range']}")
+        print(f"  Value Range: {cfg['blob']['val_range']}")
     print(f"{'='*60}\n")
 
 if __name__ == "__main__":
