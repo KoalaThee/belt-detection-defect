@@ -13,7 +13,5 @@ Thumbs.db
 *.log
 jupyter-*.json
 .ipynb_checkpoints/
-/data/
-/patch_data/
 /utility/
 
