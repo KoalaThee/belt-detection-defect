@@ -263,21 +263,52 @@ def load_settings(path):
                 cfg[k] = user[k]
     return cfg
 
+# ---------- Expected Pill Counts (Ground Truth) ----------
+DEFECT_EXPECTED_COUNTS = {
+    "clip_1762491325.mp4": 7,
+    "clip_1762491458.mp4": 7,
+    "clip_1762491749.mp4": 6,
+    "clip_1762491905.mp4": 6,
+    "clip_1762492383.mp4": 5,
+    "clip_1762492645.mp4": 4,
+    "clip_1762492660.mp4": 4,
+    "clip_1762492699.mp4": 4,
+    "clip_1762492714.mp4": 4,
+    "clip_1762493073.mp4": 7,
+    "clip_1762493098.mp4": 8,
+    "clip_1762493114.mp4": 8,
+    "clip_1762493127.mp4": 6,
+    "clip_1762493150.mp4": 7,
+    "clip_1762493171.mp4": 7,
+    "clip_1762493184.mp4": 7,
+    "clip_1762493198.mp4": 7,
+    "clip_1762493905.mp4": 6,
+    "clip_1762493929.mp4": 6,
+    "clip_1762493946.mp4": 6,
+    "clip_1762493961.mp4": 6,
+}
+
+OK_EXPECTED_COUNT = 8  # All OK videos should detect 8 pills
+
 # ---------- Evaluation Functions ----------
 def evaluate_video(video_path, cfg, max_frames, cluster_distance, min_detection_ratio, 
-                   hue_tolerance=None, sat_range_min=None, val_range_min=None, show_vis=False, is_ok=True):
+                   hue_tolerance=None, sat_range_min=None, val_range_min=None, show_vis=False, is_ok=True,
+                   expected_count=None):
     """
     Evaluate a single video with given temporal parameters.
     
-    Binary scoring (not time-based):
-    - For OK videos: score 1.0 if video ever reaches >=8 pills, 0.0 otherwise
-    - For Defect videos: score 1.0 if video never reaches >=8 pills, 0.0 if it ever reaches >=8
+    Scoring based on maximum detected pills matching expected count:
+    - For OK videos: score 1.0 if max detected == 8, otherwise score based on closeness
+    - For Defect videos: score 1.0 if max detected == expected_count, otherwise score based on closeness
     
-    Returns binary score (0.0 or 1.0).
+    Returns tuple (score, frames_with_exactly_expected):
+    - score: 0.0-1.0 (higher is better, 1.0 = perfect match)
+    - frames_with_exactly_expected: Count of frames where stable_count == expected_count (for tiebreaking)
     
     Args:
         show_vis: If True, display video processing in real-time
         is_ok: True for OK videos, False for Defect videos
+        expected_count: Expected number of pills for this video (None = use default: 8 for OK, lookup for Defect)
     """
     warp_w = cfg["warp"]["width"]
     warp_h = cfg["warp"]["height"]
@@ -295,7 +326,7 @@ def evaluate_video(video_path, cfg, max_frames, cluster_distance, min_detection_
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         print(f"      WARNING: Cannot open {video_path}")
-        return 0.0
+        return 0.0, 0
     
     # Get total frame count for progress
     total_video_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -304,8 +335,19 @@ def evaluate_video(video_path, cfg, max_frames, cluster_distance, min_detection_
     total_frames = 0
     last_progress_print = 0
     
-    # Track if video ever reached threshold (binary check, not time-based)
-    ever_reached_8_plus = False
+    # Determine expected count
+    if expected_count is None:
+        if is_ok:
+            expected_count = OK_EXPECTED_COUNT
+        else:
+            video_name = Path(video_path).name
+            expected_count = DEFECT_EXPECTED_COUNTS.get(video_name, 8)  # Default to 8 if not found
+    
+    # Track maximum detected count
+    max_detected_count = 0
+    
+    # Track frames where count matches expected (secondary heuristic for tiebreaking)
+    frames_with_exactly_expected = 0
     
     while True:
         ok, frame = cap.read()
@@ -344,9 +386,13 @@ def evaluate_video(video_path, cfg, max_frames, cluster_distance, min_detection_
         
         total_frames += 1
         
-        # Check if threshold was reached (binary check, not time-based)
-        if stable_count >= 8:
-            ever_reached_8_plus = True
+        # Track maximum detected count
+        if stable_count > max_detected_count:
+            max_detected_count = stable_count
+        
+        # Track frames with exactly expected count (secondary heuristic for tiebreaking)
+        if stable_count == expected_count:
+            frames_with_exactly_expected += 1
         
         # Print progress every 10% of video
         if total_video_frames > 0:
@@ -383,9 +429,10 @@ def evaluate_video(video_path, cfg, max_frames, cluster_distance, min_detection_
             video_name = Path(video_path).name
             cv2.putText(vis, video_name, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             
-            # Show threshold status
-            threshold_status = "Reached >=8" if ever_reached_8_plus else "Not reached >=8"
-            cv2.putText(vis, threshold_status, (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            # Show max detected and expected
+            status_text = f"Max: {max_detected_count}, Expected: {expected_count}"
+            status_color = (0, 255, 0) if max_detected_count == expected_count else (0, 0, 255)
+            cv2.putText(vis, status_text, (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
             
             cv2.imshow("Grid Search - Video Processing", vis)
             # Small delay to allow visualization, but don't block
@@ -399,15 +446,19 @@ def evaluate_video(video_path, cfg, max_frames, cluster_distance, min_detection_
         cv2.destroyAllWindows()
     
     if total_frames == 0:
-        return 0.0
+        return 0.0, 0  # Return (score, frames_with_exactly_expected)
     
-    # Binary scoring: check if video ever reached threshold
-    if is_ok:
-        # OK video: must reach >=8 at least once
-        return 1.0 if ever_reached_8_plus else 0.0
+    # Score based on how close max detected is to expected count
+    if max_detected_count == expected_count:
+        score = 1.0  # Perfect match
     else:
-        # Defect video: must NOT reach >=8 at any time
-        return 1.0 if not ever_reached_8_plus else 0.0
+        # Penalty for deviation: linear penalty based on difference
+        difference = abs(max_detected_count - expected_count)
+        # Score decreases linearly: difference of 1 = 0.5, difference of 2 = 0.0, etc.
+        score = max(0.0, 1.0 - (difference * 0.5))
+    
+    # Return both score and count of frames with exactly expected count
+    return score, frames_with_exactly_expected
 
 def evaluate_parameter_set(max_frames, cluster_distance, min_detection_ratio, cfg, ok_videos, defect_videos, 
                            hue_tolerance=None, sat_range_min=None, val_range_min=None, 
@@ -415,8 +466,8 @@ def evaluate_parameter_set(max_frames, cluster_distance, min_detection_ratio, cf
     """
     Evaluate a parameter set on all videos.
     Returns score (0-1, higher is better):
-    - OK videos: score 1.0 if video ever reaches >=8 pills, 0.0 otherwise
-    - Defect videos: score 1.0 if video never reaches >=8 pills, 0.0 if it ever reaches >=8
+    - OK videos: score based on how close max detected is to 8
+    - Defect videos: score based on how close max detected is to expected count for each video
     - Final score: average of all video scores (weighted: 50% OK, 50% Defect)
     
     Args:
@@ -424,37 +475,43 @@ def evaluate_parameter_set(max_frames, cluster_distance, min_detection_ratio, cf
         iteration_num: Current iteration number for progress display
         total_iterations: Total number of iterations (for progress calculation)
     """
-    # Evaluate OK videos (must reach >=8 at least once)
+    # Evaluate OK videos (should detect 8)
     ok_scores = []
+    ok_frames_exactly_expected = []  # Track frames with exactly expected count for OK videos
     total_ok = len(ok_videos)
     for i, video_path in enumerate(ok_videos):
         # Only show visualization for first OK video if enabled
         vis_enabled = show_vis and i == 0
         if iteration_num is not None:
             print(f"    Processing OK video {i+1}/{total_ok}: {Path(video_path).name}")
-        ratio = evaluate_video(video_path, cfg, max_frames, cluster_distance, min_detection_ratio,
+        score, frames_exactly_expected = evaluate_video(video_path, cfg, max_frames, cluster_distance, min_detection_ratio,
                               hue_tolerance=hue_tolerance, sat_range_min=sat_range_min, val_range_min=val_range_min,
-                              show_vis=vis_enabled, is_ok=True)
-        ok_scores.append(ratio)
+                              show_vis=vis_enabled, is_ok=True, expected_count=OK_EXPECTED_COUNT)
+        ok_scores.append(score)
+        ok_frames_exactly_expected.append(frames_exactly_expected)
         if iteration_num is not None:
-            status = "PASS (reached >=8)" if ratio == 1.0 else "FAIL (never reached >=8)"
-            print(f"      → Score: {ratio:.0f} ({status})")
+            status = "PASS" if score == 1.0 else f"Score: {score:.2f}"
+            print(f"      → {status}, frames=={OK_EXPECTED_COUNT}: {frames_exactly_expected}")
     
-    # Evaluate Defect videos (must NOT reach >=8 at any time)
+    # Evaluate Defect videos (should match expected count for each video)
     defect_scores = []
+    defect_frames_exactly_expected = []  # Track frames with exactly expected count for Defect videos
     total_defect = len(defect_videos)
     for i, video_path in enumerate(defect_videos):
         # Only show visualization for first Defect video if enabled
         vis_enabled = show_vis and i == 0
+        video_name = Path(video_path).name
+        expected_count = DEFECT_EXPECTED_COUNTS.get(video_name, 8)  # Default to 8 if not found
         if iteration_num is not None:
-            print(f"    Processing Defect video {i+1}/{total_defect}: {Path(video_path).name}")
-        ratio = evaluate_video(video_path, cfg, max_frames, cluster_distance, min_detection_ratio,
+            print(f"    Processing Defect video {i+1}/{total_defect}: {video_name} (expected: {expected_count})")
+        score, frames_exactly_expected = evaluate_video(video_path, cfg, max_frames, cluster_distance, min_detection_ratio,
                               hue_tolerance=hue_tolerance, sat_range_min=sat_range_min, val_range_min=val_range_min,
-                              show_vis=vis_enabled, is_ok=False)
-        defect_scores.append(ratio)
+                              show_vis=vis_enabled, is_ok=False, expected_count=expected_count)
+        defect_scores.append(score)
+        defect_frames_exactly_expected.append(frames_exactly_expected)
         if iteration_num is not None:
-            status = "PASS (never reached >=8)" if ratio == 1.0 else "FAIL (reached >=8)"
-            print(f"      → Score: {ratio:.0f} ({status})")
+            status = "PASS" if score == 1.0 else f"Score: {score:.2f}"
+            print(f"      → {status}, frames=={expected_count}: {frames_exactly_expected}")
     
     # Calculate composite score
     # Both OK and Defect scores are already normalized (0-1, higher is better)
@@ -466,7 +523,11 @@ def evaluate_parameter_set(max_frames, cluster_distance, min_detection_ratio, cf
     # Both scores are already "higher is better", so no need to invert defect
     score = 0.5 * avg_ok + 0.5 * avg_defect
     
-    return score, avg_ok, avg_defect
+    # Calculate total frames with exactly expected count (for tiebreaking)
+    total_ok_frames_exactly_expected = sum(ok_frames_exactly_expected) if ok_frames_exactly_expected else 0
+    total_defect_frames_exactly_expected = sum(defect_frames_exactly_expected) if defect_frames_exactly_expected else 0
+    
+    return score, avg_ok, avg_defect, total_ok_frames_exactly_expected, total_defect_frames_exactly_expected
 
 # ---------- Grid Search ----------
 def generate_grid_points(step_sizes=None):
@@ -568,6 +629,8 @@ def optimize_parameters_grid(cfg, ok_videos, defect_videos, step_sizes=None, sho
     best_params = None
     best_ok_ratio = 0.0
     best_defect_ratio = 0.0
+    best_ok_frames_exactly_expected = 0
+    best_defect_frames_exactly_expected = 0
     
     # Evaluate all grid points
     for iteration, params in enumerate(grid_points, 1):
@@ -580,15 +643,27 @@ def optimize_parameters_grid(cfg, ok_videos, defect_videos, step_sizes=None, sho
               f"min_ratio={min_detection_ratio:.3f}")
         print(f"{'='*60}")
         
-        score, ok_ratio, defect_ratio = evaluate_parameter_set(
+        score, ok_ratio, defect_ratio, ok_frames_exactly_expected, defect_frames_exactly_expected = evaluate_parameter_set(
             max_frames, cluster_distance, min_detection_ratio,
             cfg, ok_videos, defect_videos,
             hue_tolerance=hue_tolerance, sat_range_min=sat_range_min, val_range_min=val_range_min,
             show_vis=show_vis, iteration_num=iteration, total_iterations=total_iterations
         )
         
-        # Track best
-        is_best = score > best_score
+        # Track best (use tiebreaker: prefer higher frames matching expected counts)
+        is_best = False
+        if score > best_score:
+            is_best = True
+        elif score == best_score and best_score == 1.0:
+            # Tiebreaker: when both achieve 100%, prefer:
+            # - Higher OK frames==expected (more stable at exactly expected for OK videos)
+            # - Higher Defect frames==expected (more stable at exactly expected for Defect videos)
+            # We'll compare using a combined metric: ok_frames + defect_frames
+            current_tiebreaker = ok_frames_exactly_expected + defect_frames_exactly_expected
+            best_tiebreaker = best_ok_frames_exactly_expected + best_defect_frames_exactly_expected
+            if current_tiebreaker > best_tiebreaker:
+                is_best = True
+        
         if is_best:
             best_score = score
             best_params = {
@@ -598,11 +673,15 @@ def optimize_parameters_grid(cfg, ok_videos, defect_videos, step_sizes=None, sho
             }
             best_ok_ratio = ok_ratio
             best_defect_ratio = defect_ratio
+            best_ok_frames_exactly_expected = ok_frames_exactly_expected
+            best_defect_frames_exactly_expected = defect_frames_exactly_expected
         
         print(f"\n  Results:")
         print(f"    Score: {score:.4f} {'★ BEST' if is_best else ''}")
         print(f"    OK avg score: {ok_ratio:.3f} ({ok_ratio:.1%} videos passed)")
         print(f"    Defect avg score: {defect_ratio:.3f} ({defect_ratio:.1%} videos passed)")
+        print(f"    OK frames==expected: {ok_frames_exactly_expected} (tiebreaker)")
+        print(f"    Defect frames==expected: {defect_frames_exactly_expected} (tiebreaker)")
         if is_best:
             print(f"    → New best parameters found!")
     
@@ -617,6 +696,9 @@ def optimize_parameters_grid(cfg, ok_videos, defect_videos, step_sizes=None, sho
     print(f"\nBest Score: {best_score:.4f}")
     print(f"  OK videos avg score: {best_ok_ratio:.3f} ({best_ok_ratio:.1%})")
     print(f"  Defect videos avg score: {best_defect_ratio:.3f} ({best_defect_ratio:.1%})")
+    print(f"\nTiebreaker metrics (frames matching expected counts):")
+    print(f"  OK videos total frames=={OK_EXPECTED_COUNT}: {best_ok_frames_exactly_expected}")
+    print(f"  Defect videos total frames==expected: {best_defect_frames_exactly_expected}")
     print(f"{'='*60}\n")
     
     return {
