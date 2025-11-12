@@ -556,10 +556,10 @@ def generate_grid_points(step_sizes=None):
     # Default ranges (focused around best optimization results, optimized for ~300 combinations)
     default_ranges = {
         'max_frames': (3, 7),              # Search around 5: 3-7 (5 values with step=1)
-        'cluster_distance': (36.0, 44.0),  # Search around 40: 36-44 (5 values with step=2.0)
-        'min_detection_ratio': (0.32, 0.35) # Search around 0.335: 0.32-0.35 (7 values with step=0.005)
+        'cluster_distance': (32.0, 44.0),  # Search around 40: 32-44 (7 values with step=2.0)
+        'min_detection_ratio': (0.30, 0.35) # Search around 0.335: 0.30-0.35 (11 values with step=0.005)
     }
-    # Total: 5 × 5 × 7 = 175 combinations (well under 300 limit)
+    # Total: 5 × 7 × 11 = 385 combinations (slightly over 300, but manageable)
     
     # Merge with user-provided step sizes and ranges
     steps = {**default_steps, **step_sizes}
@@ -722,10 +722,10 @@ def main():
     # Search ranges (focused around best optimization results, optimized for ~300 combinations)
     ap.add_argument("--max-frames-range", nargs=2, type=int, default=[3, 7], 
                     help="Range for max_frames [min max] (default: 3 7, around optimal 5)")
-    ap.add_argument("--cluster-distance-range", nargs=2, type=float, default=[36.0, 44.0],
-                    help="Range for cluster_distance [min max] (default: 36.0 44.0, around optimal 40)")
-    ap.add_argument("--min-ratio-range", nargs=2, type=float, default=[0.32, 0.35],
-                    help="Range for min_detection_ratio [min max] (default: 0.32 0.35, around optimal 0.335)")
+    ap.add_argument("--cluster-distance-range", nargs=2, type=float, default=[32.0, 44.0],
+                    help="Range for cluster_distance [min max] (default: 32.0 44.0, around optimal 40)")
+    ap.add_argument("--min-ratio-range", nargs=2, type=float, default=[0.30, 0.35],
+                    help="Range for min_detection_ratio [min max] (default: 0.30 0.35, around optimal 0.335)")
     
     # Fixed color mask parameters (used for all evaluations)
     ap.add_argument("--hue-tolerance", type=int, default=18,
