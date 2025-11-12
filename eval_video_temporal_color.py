@@ -243,15 +243,15 @@ DEFAULTS = {
         # Color matching parameters
         "use_color_filter": False,  # Enable/disable color filtering
         "target_color_hsv": [19, 124, 101], # [30, 200, 200],  # Target color in HSV (default: orange)
-        "hue_tolerance": 20,  # Hue range: ±10 degrees
-        "sat_range": [50, 255],  # Saturation range
-        "val_range": [30, 255]  # Value (brightness) range
+        "hue_tolerance": 30,  # Hue range: ±10 degrees
+        "sat_range": [41, 255],  # Saturation range
+        "val_range": [2, 255]  # Value (brightness) range
     },
     "temporal": {
         "enabled": True,
-        "max_frames": 10,
-        "cluster_distance": 30.0,
-        "min_detection_ratio": 0.3
+        "max_frames": 5,
+        "cluster_distance": 35.19,
+        "min_detection_ratio": 0.139
     }
 }
 

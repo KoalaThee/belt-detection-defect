@@ -1,0 +1,13 @@
+{
+  "max_frames": 5,
+  "cluster_distance": 35.18714740301527,
+  "min_detection_ratio": 0.13873360599929419,
+  "hue_tolerance": 30,
+  "sat_range_min": 41,
+  "val_range_min": 2,
+  "target_color_hsv": [
+    19,
+    124,
+    101
+  ]
+}
