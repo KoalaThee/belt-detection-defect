@@ -269,7 +269,8 @@ def load_settings(path):
 def evaluate_video_with_visualization(video_path, cfg, show_vis=True):
     """
     Evaluate a single video with temporal tracking, HSV color matching, and optional visualization.
-    Returns duration ratio (frames with >= 8 pills / total frames) and statistics.
+    Uses binary scoring: checks if video ever reaches >=8 pills (not time-based).
+    Returns binary score and statistics.
     """
     warp_w = cfg["warp"]["width"]
     warp_h = cfg["warp"]["height"]
@@ -297,8 +298,10 @@ def evaluate_video_with_visualization(video_path, cfg, show_vis=True):
         return None
     
     total_frames = 0
-    frames_with_8_plus = 0
     count_history = []
+    
+    # Track if video ever reached threshold (binary check, not time-based)
+    ever_reached_8_plus = False
     
     blob_cfg = cfg.get("blob", {})
     use_color = blob_cfg.get("use_color_filter", False)
@@ -335,8 +338,9 @@ def evaluate_video_with_visualization(video_path, cfg, show_vis=True):
         total_frames += 1
         count_history.append(stable_count)
         
+        # Check if threshold was reached (binary check, not time-based)
         if stable_count >= 8:
-            frames_with_8_plus += 1
+            ever_reached_8_plus = True
         
         # Visualization
         if show_vis:
@@ -366,11 +370,10 @@ def evaluate_video_with_visualization(video_path, cfg, show_vis=True):
                 color_status = f"Color filter: ON (HSV={blob_cfg.get('target_color_hsv')})"
                 cv2.putText(vis, color_status, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             
-            # Show duration ratio
-            if total_frames > 0:
-                duration_ratio = frames_with_8_plus / total_frames
-                ratio_text = f"Duration ratio: {duration_ratio:.1%}"
-                cv2.putText(vis, ratio_text, (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            # Show binary threshold status
+            threshold_status = "Reached >=8" if ever_reached_8_plus else "Not reached >=8"
+            status_color = (0, 255, 0) if ever_reached_8_plus else (0, 0, 255)
+            cv2.putText(vis, threshold_status, (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
             
             cv2.imshow("Video Evaluation (Color)", vis)
             key = cv2.waitKey(1) & 0xFF
@@ -386,15 +389,22 @@ def evaluate_video_with_visualization(video_path, cfg, show_vis=True):
         print("ERROR: No frames processed")
         return None
     
-    duration_ratio = frames_with_8_plus / total_frames
+    # Calculate binary score
+    binary_score = 1.0 if ever_reached_8_plus else 0.0
+    
+    # Calculate duration ratio for diagnostic purposes
+    frames_with_8_plus = sum(1 for c in count_history if c >= 8)
+    duration_ratio = frames_with_8_plus / total_frames if total_frames > 0 else 0.0
     
     # Calculate statistics
     count_array = np.array(count_history)
     stats = {
         "total_frames": total_frames,
-        "frames_with_8_plus": frames_with_8_plus,
-        "duration_ratio": duration_ratio,
-        "accuracy_percent": duration_ratio * 100.0,
+        "ever_reached_8_plus": ever_reached_8_plus,
+        "binary_score": binary_score,
+        "frames_with_8_plus": frames_with_8_plus,  # Keep for diagnostic
+        "duration_ratio": duration_ratio,  # Keep for diagnostic
+        "accuracy_percent": duration_ratio * 100.0,  # Keep for diagnostic
         "min_count": int(count_array.min()),
         "max_count": int(count_array.max()),
         "mean_count": float(count_array.mean()),
@@ -485,9 +495,11 @@ def main():
     print(f"{'='*60}")
     print(f"Video: {video_path.name}")
     print(f"Total frames: {stats['total_frames']}")
-    print(f"Frames with >= 8 pills: {stats['frames_with_8_plus']}")
-    print(f"\nDuration Ratio: {stats['duration_ratio']:.2%}")
-    print(f"Accuracy: {stats['accuracy_percent']:.2f}%")
+    print(f"\nBinary Score: {stats['binary_score']:.0f} ({'PASS - Reached >=8' if stats['binary_score'] == 1.0 else 'FAIL - Never reached >=8'})")
+    print(f"\nDiagnostic Info:")
+    print(f"  Frames with >= 8 pills: {stats['frames_with_8_plus']}")
+    print(f"  Duration Ratio: {stats['duration_ratio']:.2%}")
+    print(f"  Accuracy: {stats['accuracy_percent']:.2f}%")
     print(f"\nCount Statistics:")
     print(f"  Min: {stats['min_count']}")
     print(f"  Max: {stats['max_count']}")

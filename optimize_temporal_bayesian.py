@@ -275,16 +275,11 @@ def evaluate_video(video_path, cfg, max_frames, cluster_distance, min_detection_
     """
     Evaluate a single video with given temporal parameters.
     
-    For OK videos:
-    - Exactly 8 pills = best (score 1.0)
-    - More than 8 pills = OK but not preferred (score 0.85)
-    - Less than 8 pills = bad (score 0.0)
+    Binary scoring (not time-based):
+    - For OK videos: score 1.0 if video ever reaches >=8 pills, 0.0 otherwise
+    - For Defect videos: score 1.0 if video never reaches >=8 pills, 0.0 if it ever reaches >=8
     
-    For Defect videos:
-    - 8 or more pills = very bad (score 0.0)
-    - Less than 8 pills = good (score 1.0)
-    
-    Returns weighted score (0-1, higher is better).
+    Returns binary score (0.0 or 1.0).
     
     Args:
         show_vis: If True, display video processing in real-time
@@ -313,8 +308,10 @@ def evaluate_video(video_path, cfg, max_frames, cluster_distance, min_detection_
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)  # Reset to beginning
     
     total_frames = 0
-    frames_with_8_plus = 0
     last_progress_print = 0
+    
+    # Track if video ever reached threshold (binary check, not time-based)
+    ever_reached_8_plus = False
     
     while True:
         ok, frame = cap.read()
@@ -359,23 +356,9 @@ def evaluate_video(video_path, cfg, max_frames, cluster_distance, min_detection_
         
         total_frames += 1
         
-        # Calculate frame score based on count
-        if is_ok:
-            # OK video: exactly 8 is best, >8 is OK but not preferred, <8 is bad
-            if stable_count == 8:
-                frame_score = 1.0  # Perfect: exactly 8 pills
-            elif stable_count > 8:
-                frame_score = 0.85  # OK but not preferred: more than 8 pills
-            else:
-                frame_score = 0.0  # Bad: less than 8 pills
-        else:
-            # Defect video: want < 8 pills
-            if stable_count >= 8:
-                frame_score = 0.0  # Very bad: detected 8+ pills in defect video
-            else:
-                frame_score = 1.0  # Good: less than 8 pills
-        
-        frames_with_8_plus += frame_score  # Accumulate scores instead of binary count
+        # Check if threshold was reached (binary check, not time-based)
+        if stable_count >= 8:
+            ever_reached_8_plus = True
         
         # Print progress every 10% of video
         if total_video_frames > 0:
@@ -412,11 +395,9 @@ def evaluate_video(video_path, cfg, max_frames, cluster_distance, min_detection_
             video_name = Path(video_path).name
             cv2.putText(vis, video_name, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             
-            # Show current score
-            if total_frames > 0:
-                current_score = frames_with_8_plus / total_frames
-                score_text = f"Score: {current_score:.3f}"
-                cv2.putText(vis, score_text, (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            # Show threshold status
+            threshold_status = "Reached >=8" if ever_reached_8_plus else "Not reached >=8"
+            cv2.putText(vis, threshold_status, (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             
             cv2.imshow("Optimization - Video Processing", vis)
             # Small delay to allow visualization, but don't block
@@ -432,8 +413,13 @@ def evaluate_video(video_path, cfg, max_frames, cluster_distance, min_detection_
     if total_frames == 0:
         return 0.0
     
-    # Return average score per frame
-    return frames_with_8_plus / total_frames
+    # Binary scoring: check if video ever reached threshold
+    if is_ok:
+        # OK video: must reach >=8 at least once
+        return 1.0 if ever_reached_8_plus else 0.0
+    else:
+        # Defect video: must NOT reach >=8 at any time
+        return 1.0 if not ever_reached_8_plus else 0.0
 
 def evaluate_parameter_set(max_frames, cluster_distance, min_detection_ratio, cfg, ok_videos, defect_videos, 
                            hue_tolerance=None, sat_range_min=None, val_range_min=None, 
@@ -441,14 +427,15 @@ def evaluate_parameter_set(max_frames, cluster_distance, min_detection_ratio, cf
     """
     Evaluate a parameter set on all videos.
     Returns score (0-1, higher is better):
-    - OK videos: prefer exactly 8 pills (penalty for >8 or <8)
-    - Defect videos: prefer <8 pills (penalty for >=8)
+    - OK videos: score 1.0 if video ever reaches >=8 pills, 0.0 otherwise
+    - Defect videos: score 1.0 if video never reaches >=8 pills, 0.0 if it ever reaches >=8
+    - Final score: average of all video scores (weighted: 60% OK, 40% Defect)
     
     Args:
         show_vis: If True, show real-time video processing (only for first video of each type)
         iteration_num: Current iteration number for progress display
     """
-    # Evaluate OK videos (prefer exactly 8 pills)
+    # Evaluate OK videos (must reach >=8 at least once)
     ok_scores = []
     total_ok = len(ok_videos)
     for i, video_path in enumerate(ok_videos):
@@ -461,9 +448,10 @@ def evaluate_parameter_set(max_frames, cluster_distance, min_detection_ratio, cf
                               show_vis=vis_enabled, is_ok=True)
         ok_scores.append(ratio)
         if iteration_num is not None:
-            print(f"      → Score: {ratio:.3f} ({ratio:.1%})")
+            status = "PASS (reached >=8)" if ratio == 1.0 else "FAIL (never reached >=8)"
+            print(f"      → Score: {ratio:.0f} ({status})")
     
-    # Evaluate Defect videos (want < 8 pills, score 1.0; >= 8 pills, score 0.0)
+    # Evaluate Defect videos (must NOT reach >=8 at any time)
     defect_scores = []
     total_defect = len(defect_videos)
     for i, video_path in enumerate(defect_videos):
@@ -476,17 +464,18 @@ def evaluate_parameter_set(max_frames, cluster_distance, min_detection_ratio, cf
                               show_vis=vis_enabled, is_ok=False)
         defect_scores.append(ratio)
         if iteration_num is not None:
-            print(f"      → Score: {ratio:.3f} ({ratio:.1%})")
+            status = "PASS (never reached >=8)" if ratio == 1.0 else "FAIL (reached >=8)"
+            print(f"      → Score: {ratio:.0f} ({status})")
     
     # Calculate composite score
     # Both OK and Defect scores are already normalized (0-1, higher is better)
     avg_ok = np.mean(ok_scores) if ok_scores else 0.0
     avg_defect = np.mean(defect_scores) if defect_scores else 0.0
     
-    # Score: weighted combination
-    # OK weight: 0.6, Defect weight: 0.4 (defect detection is critical)
+    # Score: equal weighted combination
+    # OK weight: 0.5, Defect weight: 0.5 (equal importance)
     # Both scores are already "higher is better", so no need to invert defect
-    score = 0.6 * avg_ok + 0.4 * avg_defect
+    score = 0.5 * avg_ok + 0.5 * avg_defect
     
     return score, avg_ok, avg_defect
 
@@ -527,17 +516,17 @@ def optimize_parameters(cfg, ok_videos, defect_videos, n_calls=50, random_state=
         space = [
             Integer(5, 45, name='max_frames'),           # 5-45 frames
             Real(15.0, 40.0, name='cluster_distance'),  # 15-40 pixels
-            Real(0.05, 0.4, name='min_detection_ratio'), # 0.05-0.4 (5%-40%)
-            Integer(5, 30, name='hue_tolerance'),        # 5-30 degrees
-            Integer(0, 150, name='sat_range_min'),       # 0-150 (saturation min)
-            Integer(0, 150, name='val_range_min')         # 0-150 (value/brightness min)
+            Real(0.10, 0.40, name='min_detection_ratio'), # 0.10-0.40 (10%-40%)
+            Integer(0, 20, name='hue_tolerance'),        # 0-20 degrees
+            Integer(40, 150, name='sat_range_min'),       # 40-150 (saturation min, 40 upwards)
+            Integer(35, 50, name='val_range_min')         # 35-50 (value/brightness min)
         ]
     else:
         # Optimize only temporal parameters (3 parameters)
         space = [
             Integer(5, 45, name='max_frames'),           # 5-45 frames
             Real(15.0, 40.0, name='cluster_distance'),  # 15-40 pixels
-            Real(0.05, 0.4, name='min_detection_ratio') # 0.05-0.4 (5%-40%)
+            Real(0.10, 0.40, name='min_detection_ratio') # 0.10-0.40 (10%-40%)
         ]
     
     # Track best results
@@ -594,8 +583,8 @@ def optimize_parameters(cfg, ok_videos, defect_videos, n_calls=50, random_state=
             
             print(f"\n  Results:")
             print(f"    Score: {score:.4f} {'★ BEST' if is_best else ''}")
-            print(f"    OK avg score: {ok_ratio:.3f} ({ok_ratio:.1%})")
-            print(f"    Defect avg score: {defect_ratio:.3f} ({defect_ratio:.1%})")
+            print(f"    OK avg score: {ok_ratio:.3f} ({ok_ratio:.1%} videos passed)")
+            print(f"    Defect avg score: {defect_ratio:.3f} ({defect_ratio:.1%} videos passed)")
             if is_best:
                 print(f"    → New best parameters found!")
             
@@ -635,8 +624,8 @@ def optimize_parameters(cfg, ok_videos, defect_videos, n_calls=50, random_state=
             
             print(f"\n  Results:")
             print(f"    Score: {score:.4f} {'★ BEST' if is_best else ''}")
-            print(f"    OK avg score: {ok_ratio:.3f} ({ok_ratio:.1%})")
-            print(f"    Defect avg score: {defect_ratio:.3f} ({defect_ratio:.1%})")
+            print(f"    OK avg score: {ok_ratio:.3f} ({ok_ratio:.1%} videos passed)")
+            print(f"    Defect avg score: {defect_ratio:.3f} ({defect_ratio:.1%} videos passed)")
             if is_best:
                 print(f"    → New best parameters found!")
             
