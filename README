@@ -1,0 +1,6 @@
+python optimize_temporal_grid.py \
+    --target-color-hsv 19 124 101 \
+    --hue-tolerance 18 \
+    --sat-range-min 90 \
+    --val-range-min 35 \
+    --auto-run
