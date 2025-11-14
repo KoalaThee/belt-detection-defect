@@ -1,4 +1,3 @@
-# calibrate_quad.py
 import cv2, json, sys
 from pathlib import Path
 

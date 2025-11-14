@@ -1,6 +1,115 @@
-python optimize_temporal_grid.py \
+# Pill Counting System
+
+A computer vision-based pill counting and defect detection system for conveyor belt applications.
+
+## Features
+
+- Real-time pill detection using HSV color matching
+- Web dashboard for monitoring detection results
+- Hardware integration with Raspberry Pi Pico via serial
+- Temporal tracking for accurate counting
+
+capture_vid/
+├── app_flask.py # Flask web application - starts detection thread and serves dashboard
+├── app_state.py # Thread-safe state management for sharing detection results between Flask and detection loop
+├── config_flask.py # Flask configuration (host, port, video source, debug settings)
+├── count_pills_color.py # Main detection script - HSV color matching + temporal tracking + blob detection
+├── hardware.py # Serial communication with Raspberry Pi Pico (sends OK/DEFECT commands)
+├── requirements.txt # Python dependencies
+├── simulation_vid.mp4 # Test video file for development
+│
+├── config/
+│ ├── quad.json # Perspective transform calibration - 4 corner points for warping camera view
+│ └── sample_frame.jpg # Reference image used for calibrating quad.json
+│
+├── templates/
+│ └── dashboard.html # Web dashboard UI - displays detection status, counts, and live image
+│
+├── utility/
+│ ├── calibrate_quad.py # Interactive tool to create/update quad.json by clicking 4 corners
+│ ├── vid2.py # Video capture tool - records clips from webcam to data/OK/ and data/Defect/
+│ ├── optimize_temporal_grid.py # Grid search optimizer - exhaustively tests parameter combinations
+│ ├── optimize_temporal_bayesian.py # Bayesian optimizer - intelligent parameter search
+│ ├── optimized_params_color.json # Stores optimized parameters from previous optimization runs
+│ ├── monitor.py # Test script for Pico serial communication (sends TEST/OK/DEFECT)
+│ ├── count_pills_simple.py # Reference implementation - functions imported by optimization scripts
+│ └── eval_video_temporal_color.py # Single video evaluator - tests detection on individual videos
+│
+└── data/ # Training/evaluation video dataset
+├── OK/ # Video clips with 8+ pills (good samples)
+│ └── clip_.mp4
+└── Defect/ # Video clips with <8 pills (defective samples)
+└── clip_.mp4
+
+## Installation
+
+```bash
+pip install -r requirements.txt
+```
+
+## Usage
+
+### Run Detection
+
+```bash
+python count_pills_color.py 0 --show
+```
+
+**Note:** When running with `--show`, adjust camera settings using keyboard controls:
+- `w/s` keys: Increase/decrease exposure
+- `a/d` keys: Decrease/increase brightness
+
+Optimal parameters for detection: exposure -9 and brightness 100
+
+### Run Web Dashboard
+1. Run with external camera (default)
+```bash
+python app_flask.py
+```
+
+2. Run with video file (prerecorded)
+```bash
+python app_flask.py --video-source simulation_vid.mp4
+```
+
+Then open `http://localhost:5000` in your browser.
+
+### Optimize Parameters: Grid Search
+
+```bash
+python utility/optimize_temporal_grid.py \
     --target-color-hsv 19 124 101 \
     --hue-tolerance 18 \
     --sat-range-min 90 \
     --val-range-min 35 \
     --auto-run
+```
+
+### Optimize Parameters: Bayesian Optimization
+
+
+```bash
+python utility/optimize_temporal_bayesian.py \
+    --target-color-hsv 19 124 101 \
+    --hue-tolerance 18 \
+    --sat-range-min 90 \
+    --val-range-min 35 \
+    --optimize-color \
+    --n-calls 150 \
+    --auto-run
+```
+
+## Hardware Configuration
+
+Configure serial connection in your code:
+```python
+pico = serial.Serial("COM3", 115200, timeout=1)
+```
+
+## Requirements
+
+- Python 3.8+
+- OpenCV
+- Flask
+- NumPy
+- PySerial (for hardware communication)

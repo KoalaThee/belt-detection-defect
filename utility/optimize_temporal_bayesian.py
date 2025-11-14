@@ -1,10 +1,3 @@
-# optimize_temporal_bayesian.py
-"""
-Parameter optimizer using Bayesian optimization to find optimal temporal tracking and color matching parameters.
-Tests combinations of max_frames, cluster_distance, min_detection_ratio, and color parameters on OK/Defect videos.
-
-Requires: pip install scikit-optimize
-"""
 import cv2
 import json
 import argparse
@@ -82,7 +75,6 @@ def preprocess_frame(frame_bgr, pre):
     return img, gray
 
 class TemporalPillTracker:
-    """Tracks pill detections across multiple frames to stabilize counts."""
     def __init__(self, max_frames=30, cluster_distance=30.0, min_detection_ratio=0.3):
         self.max_frames = max(2, max_frames) if max_frames > 0 else 2
         self.cluster_distance = cluster_distance
@@ -155,21 +147,7 @@ class TemporalPillTracker:
         self.detection_history.clear()
         self.frame_counter = 0
 
-# ---------- HSV Color Masking Functions ----------
 def create_color_mask(warped_bgr, target_color_hsv, hue_tolerance=10, sat_range=(50, 255), val_range=(50, 255)):
-    """
-    Create a binary mask for specific color range in HSV space.
-    
-    Args:
-        warped_bgr: Input BGR image
-        target_color_hsv: Target color in HSV [H, S, V] (0-180, 0-255, 0-255)
-        hue_tolerance: Hue tolerance in degrees (0-180)
-        sat_range: Saturation range tuple (min, max) (0-255)
-        val_range: Value (brightness) range tuple (min, max) (0-255)
-    
-    Returns:
-        Binary mask (255 = match, 0 = no match)
-    """
     hsv = cv2.cvtColor(warped_bgr, cv2.COLOR_BGR2HSV)
     
     # Handle hue wrap-around (red is at both 0 and 180)
@@ -191,19 +169,6 @@ def create_color_mask(warped_bgr, target_color_hsv, hue_tolerance=10, sat_range=
     return mask
 
 def detect_with_color_mask(warped_bgr, gray_w, detector, cfg):
-    """
-    Detect pills using HSV color mask + blob detector.
-    
-    Args:
-        warped_bgr: Warped color image
-        gray_w: Warped grayscale image
-        detector: Blob detector
-        cfg: Configuration dictionary
-    
-    Returns:
-        keypoints: Detected keypoints
-        color_mask: Color mask used (for visualization), or None if not using color filter
-    """
     blob_cfg = cfg.get("blob", {})
     
     # Check if color filtering is enabled
@@ -269,22 +234,8 @@ def load_settings(path):
                 cfg[k] = user[k]
     return cfg
 
-# ---------- Evaluation Functions ----------
 def evaluate_video(video_path, cfg, max_frames, cluster_distance, min_detection_ratio, 
                    hue_tolerance=None, sat_range_min=None, val_range_min=None, show_vis=False, is_ok=True):
-    """
-    Evaluate a single video with given temporal parameters.
-    
-    Binary scoring (not time-based):
-    - For OK videos: score 1.0 if video ever reaches >=8 pills, 0.0 otherwise
-    - For Defect videos: score 1.0 if video never reaches >=8 pills, 0.0 if it ever reaches >=8
-    
-    Returns binary score (0.0 or 1.0).
-    
-    Args:
-        show_vis: If True, display video processing in real-time
-        is_ok: True for OK videos, False for Defect videos
-    """
     warp_w = cfg["warp"]["width"]
     warp_h = cfg["warp"]["height"]
     M = None
@@ -424,17 +375,6 @@ def evaluate_video(video_path, cfg, max_frames, cluster_distance, min_detection_
 def evaluate_parameter_set(max_frames, cluster_distance, min_detection_ratio, cfg, ok_videos, defect_videos, 
                            hue_tolerance=None, sat_range_min=None, val_range_min=None, 
                            show_vis=False, iteration_num=None):
-    """
-    Evaluate a parameter set on all videos.
-    Returns score (0-1, higher is better):
-    - OK videos: score 1.0 if video ever reaches >=8 pills, 0.0 otherwise
-    - Defect videos: score 1.0 if video never reaches >=8 pills, 0.0 if it ever reaches >=8
-    - Final score: average of all video scores (weighted: 60% OK, 40% Defect)
-    
-    Args:
-        show_vis: If True, show real-time video processing (only for first video of each type)
-        iteration_num: Current iteration number for progress display
-    """
     # Evaluate OK videos (must reach >=8 at least once)
     ok_scores = []
     total_ok = len(ok_videos)
@@ -468,27 +408,15 @@ def evaluate_parameter_set(max_frames, cluster_distance, min_detection_ratio, cf
             print(f"      → Score: {ratio:.0f} ({status})")
     
     # Calculate composite score
-    # Both OK and Defect scores are already normalized (0-1, higher is better)
     avg_ok = np.mean(ok_scores) if ok_scores else 0.0
     avg_defect = np.mean(defect_scores) if defect_scores else 0.0
     
     # Score: equal weighted combination
-    # OK weight: 0.5, Defect weight: 0.5 (equal importance)
-    # Both scores are already "higher is better", so no need to invert defect
     score = 0.5 * avg_ok + 0.5 * avg_defect
     
     return score, avg_ok, avg_defect
 
-# ---------- Bayesian Optimization ----------
 def optimize_parameters(cfg, ok_videos, defect_videos, n_calls=50, random_state=42, show_vis=False, optimize_color=False, target_color_hsv=None):
-    """
-    Use Bayesian optimization to find optimal temporal and color parameters.
-    
-    Args:
-        show_vis: If True, show real-time video processing during optimization
-        optimize_color: If True, optimize color matching parameters
-        target_color_hsv: Target HSV color [H, S, V] (required if optimize_color=True)
-    """
     print(f"\n{'='*60}")
     print(f"Optimizing Parameters")
     print(f"{'='*60}")
@@ -701,7 +629,6 @@ def optimize_parameters(cfg, ok_videos, defect_videos, n_calls=50, random_state=
             "min_detection_ratio": best_min_ratio
         }
 
-# ---------- Main ----------
 def main():
     ap = argparse.ArgumentParser(description="Optimize temporal tracking and color matching parameters using Bayesian optimization")
     ap.add_argument("--settings", default="", help="JSON settings file (for warp/preprocess/blob)")

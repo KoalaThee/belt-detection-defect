@@ -1,9 +1,7 @@
-# count_pills_warp.py
 import cv2, json, argparse, time, numpy as np
 from pathlib import Path
 from collections import deque
 
-# ---------- Warp helpers ----------
 def load_quad(json_path, warp_w, warp_h):
     with open(json_path, "r") as f:
         pts = np.array(json.load(f)["points"], dtype=np.float32)  # TL,TR,BR,BL
@@ -13,7 +11,6 @@ def load_quad(json_path, warp_w, warp_h):
 def warp_topdown(bgr, M, size):
     return cv2.warpPerspective(bgr, M, size)
 
-# ---------- Blob detector ----------
 def build_blob_params(cfg):
     p = cv2.SimpleBlobDetector_Params()
     p.minThreshold  = cfg["min_thr"]
@@ -29,7 +26,6 @@ def build_blob_params(cfg):
     p.filterByColor = False
     return cv2.SimpleBlobDetector_create(p)
 
-# ---------- Preprocess (identical for camera & video) ----------
 def apply_gamma(img, gamma):
     if abs(gamma - 1.0) < 1e-3: return img
     # LUT for speed
@@ -53,43 +49,32 @@ def center_zoom(bgr, zoom):
     return cv2.resize(crop, (w, h), interpolation=cv2.INTER_LINEAR)
 
 def preprocess_frame(frame_bgr, pre):
-    # 1) digital zoom
+    # digital zoom
     img = center_zoom(frame_bgr, pre["zoom"])
-    # 2) optional rotate (keep tray aligned)
+    # rotate (keep tray aligned)
     if abs(pre["rotate_deg"]) > 1e-3:
         h, w = img.shape[:2]
         M = cv2.getRotationMatrix2D((w/2, h/2), pre["rotate_deg"], 1.0)
         img = cv2.warpAffine(img, M, (w, h))
-    # 3) brightness/contrast (alpha, beta)
+    # brightness/contrast (alpha, beta)
     img = cv2.convertScaleAbs(img, alpha=pre["alpha"], beta=pre["beta"])
-    # 4) gamma
+    # gamma
     img = apply_gamma(img, pre["gamma"])
-    # 5) simple white-balance gains
+    # simple white-balance gains
     img = apply_wb_gains(img, pre["wb"]) if pre["wb"] else img
     # Return both color + gray variants
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    # 6) CLAHE
+    # CLAHE
     clahe = cv2.createCLAHE(clipLimit=pre["clahe_clip"], tileGridSize=(pre["clahe_tile"], pre["clahe_tile"]))
     gray = clahe.apply(gray)
-    # 7) blur
+    # blur
     if pre["blur"] > 0:
         k = pre["blur"] + (1 - pre["blur"] % 2)  # odd
         gray = cv2.GaussianBlur(gray, (k, k), 0)
     return img, gray
 
-# ---------- Temporal Aggregation ----------
 class TemporalPillTracker:
-    """
-    Tracks pill detections across multiple frames to stabilize counts.
-    Handles flickering by aggregating detections over time using spatial clustering.
-    """
     def __init__(self, max_frames=30, cluster_distance=30.0, min_detection_ratio=0.3):
-        """
-        Args:
-            max_frames: Number of recent frames to track (default: 30, min: 2)
-            cluster_distance: Max pixel distance for clustering detections (default: 30.0)
-            min_detection_ratio: Min ratio of frames a pill must appear in to count (default: 0.3 = 30%)
-        """
         # Ensure max_frames is at least 2 for temporal tracking to work
         self.max_frames = max(2, max_frames) if max_frames > 0 else 2
         self.cluster_distance = cluster_distance
@@ -98,18 +83,12 @@ class TemporalPillTracker:
         self.frame_counter = 0
     
     def add_frame(self, keypoints):
-        """Add detections from current frame to history."""
         points = np.array([(kp.pt[0], kp.pt[1]) for kp in keypoints], dtype=np.float32)
         self.detection_history.append((self.frame_counter, points))
         self.frame_counter += 1
     
     def get_stable_count(self):
-        """
-        Calculate stable pill count by clustering detections across frames.
-        Returns the number of pills that appear frequently enough.
-        """
         if len(self.detection_history) < 2:
-            # Not enough frames yet, return current count
             if self.detection_history:
                 return len(self.detection_history[-1][1])
             return 0
@@ -141,10 +120,6 @@ class TemporalPillTracker:
         return stable_count
     
     def _cluster_points(self, points_array, frame_indices):
-        """
-        Cluster spatially nearby points using distance-based grouping.
-        Returns list of sets, each containing frame indices where that cluster appears.
-        """
         n = len(points_array)
         if n == 0:
             return []
@@ -177,11 +152,9 @@ class TemporalPillTracker:
         return clusters
     
     def reset(self):
-        """Reset tracking state."""
         self.detection_history.clear()
         self.frame_counter = 0
 
-# ---------- Settings ----------
 DEFAULTS = {
     "warp": {"quad": "", "width": 600, "height": 300},
     "preprocess": {
@@ -199,11 +172,6 @@ DEFAULTS = {
     },
     "temporal": {
         "enabled": True,
-        # TUNING GUIDE:
-        # - max_frames: More frames = more stable but slower response (20-45 recommended)
-        # - cluster_distance: Larger = more lenient spatial matching (25-40px recommended)
-        # - min_detection_ratio: Lower = count pills appearing less often (0.2-0.4 recommended)
-        # To disable temporal tracking: set "enabled": False OR "max_frames": 0
         "max_frames": 10,              # Number of frames to track (recommended: 20-45)
         "cluster_distance": 30.0,       # Pixel distance for clustering (recommended: 25-40)
         "min_detection_ratio": 0.3      # Min appearance ratio (recommended: 0.2-0.4)
@@ -222,7 +190,6 @@ def load_settings(path):
                 cfg[k] = user[k]
     return cfg
 
-# ---------- Camera config (live only) ----------
 def configure_camera(cap, args):
     if args.fourcc:
         cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*args.fourcc))
@@ -246,7 +213,6 @@ def configure_camera(cap, args):
     if args.focus is not None:
         cap.set(cv2.CAP_PROP_FOCUS, float(args.focus))
 
-# ---------- Main ----------
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", default="0", help="Camera index or path to video/image")
@@ -267,7 +233,7 @@ def main():
     ap.add_argument("--auto-focus", type=lambda s:s.lower() in ("1","true","yes"), default=None)
     ap.add_argument("--focus", type=float, default=None)
 
-    # quick overrides (optional)
+    # quick overrides
     ap.add_argument("--zoom", type=float, default=None)
     ap.add_argument("--rotate", type=float, default=None)
     ap.add_argument("--alpha", type=float, default=None)

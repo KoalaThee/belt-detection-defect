@@ -13,4 +13,3 @@ Thumbs.db
 *.log
 jupyter-*.json
 .ipynb_checkpoints/
-/temp/

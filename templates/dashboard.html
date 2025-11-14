@@ -1,0 +1,306 @@
+<!-- templates/dashboard.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conveyor Defect Detection Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
+            color: #e0e0e0;
+            padding: 2rem;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 2rem;
+            color: #fff;
+            font-size: 2rem;
+        }
+        
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 2rem;
+            margin-bottom: 1rem;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        
+        .status {
+            font-size: 3rem;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 1.5rem;
+            padding: 1rem;
+            border-radius: 12px;
+            transition: all 0.3s ease;
+        }
+        
+        .status.waiting {
+            color: #ffa726;
+            background: rgba(255, 167, 38, 0.1);
+        }
+        
+        .status.ok {
+            color: #4caf50;
+            background: rgba(76, 175, 80, 0.1);
+        }
+        
+        .status.defect {
+            color: #f44336;
+            background: rgba(244, 67, 54, 0.1);
+        }
+        
+        .status.error {
+            color: #ff5252;
+            background: rgba(255, 82, 82, 0.1);
+        }
+        
+        .row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .row:last-child {
+            border-bottom: none;
+        }
+        
+        .label {
+            color: #b0b0b0;
+            font-size: 0.9rem;
+        }
+        
+        .value {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #fff;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        
+        .stat-box {
+            background: rgba(255, 255, 255, 0.03);
+            padding: 1rem;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-top: 0.5rem;
+        }
+        
+        .stat-box.ok .stat-value {
+            color: #4caf50;
+        }
+        
+        .stat-box.defect .stat-value {
+            color: #f44336;
+        }
+        
+        #image-container {
+            background: rgba(255, 255, 255, 0.03);
+            padding: 1rem;
+            border-radius: 8px;
+        }
+        
+        #captured_image {
+            max-height: 300px;
+            object-fit: contain;
+        }
+        
+        .connection-status {
+            text-align: center;
+            margin-top: 1rem;
+            font-size: 0.85rem;
+            color: #888;
+        }
+        
+        .connection-status.connected {
+            color: #4caf50;
+        }
+        
+        .connection-status.disconnected {
+            color: #f44336;
+        }
+        
+        button {
+            background: rgba(76, 175, 80, 0.2);
+            border: 1px solid rgba(76, 175, 80, 0.5);
+            color: #4caf50;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            margin-top: 1rem;
+            transition: all 0.2s;
+            width: 100%;
+        }
+        
+        button:hover {
+            background: rgba(76, 175, 80, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Conveyor Defect Detection</h1>
+        
+        <div class="card">
+            <div id="status" class="status waiting">WAITING...</div>
+            
+            <div class="row">
+                <span class="label">Last Count:</span>
+                <span id="last_count" class="value">-</span>
+            </div>
+            
+            <div class="row">
+                <span class="label">Last Updated:</span>
+                <span id="last_updated" class="value">-</span>
+            </div>
+            
+            <div class="stats">
+                <div class="stat-box ok">
+                    <div class="label">Total OK</div>
+                    <div id="total_ok" class="stat-value">0</div>
+                </div>
+                <div class="stat-box defect">
+                    <div class="label">Total DEFECT</div>
+                    <div id="total_defect" class="stat-value">0</div>
+                </div>
+            </div>
+            
+            <div class="row" style="margin-top: 1rem;">
+                <span class="label">Highest Count:</span>
+                <span id="highest_count" class="value">-</span>
+            </div>
+            
+            <div id="image-container" style="margin-top: 1rem; text-align: center; display: none;">
+                <div class="label" style="margin-bottom: 0.5rem;">Captured Image (Highest Count)</div>
+                <img id="captured_image" src="" alt="No image captured" style="max-width: 100%; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);">
+            </div>
+            
+            <button onclick="resetCounters()">Reset Counters</button>
+            
+            <div id="connection_status" class="connection-status disconnected">
+                Connecting...
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const POLL_INTERVAL = {{ poll_interval }};
+        let lastUpdateTime = null;
+        let consecutiveErrors = 0;
+        
+        async function fetchStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                
+                if (!data.success) {
+                    throw new Error(data.error || 'Unknown error');
+                }
+                
+                const state = data.data;
+                updateUI(state);
+                consecutiveErrors = 0;
+                updateConnectionStatus(true);
+                
+            } catch (e) {
+                console.error('Error fetching status:', e);
+                consecutiveErrors++;
+                
+                if (consecutiveErrors > 3) {
+                    updateConnectionStatus(false);
+                }
+            }
+        }
+        
+        function updateUI(state) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = state.last_result;
+            statusEl.className = `status ${state.last_result.toLowerCase()}`;
+            
+            document.getElementById('last_count').textContent = state.last_count;
+            document.getElementById('total_ok').textContent = state.total_ok;
+            document.getElementById('total_defect').textContent = state.total_defect;
+            document.getElementById('last_updated').textContent = state.last_updated || '-';
+            
+            // Update highest count
+            const highestCount = state.highest_count || 0;
+            document.getElementById('highest_count').textContent = highestCount > 0 ? highestCount : '-';
+            
+            // Update captured image
+            const imageContainer = document.getElementById('image-container');
+            const capturedImage = document.getElementById('captured_image');
+            
+            if (highestCount > 0 && state.has_image) {
+                // Add timestamp to prevent caching
+                const timestamp = new Date().getTime();
+                capturedImage.src = `/api/image?t=${timestamp}`;
+                imageContainer.style.display = 'block';
+            } else {
+                imageContainer.style.display = 'none';
+            }
+        }
+        
+        function updateConnectionStatus(connected) {
+            const statusEl = document.getElementById('connection_status');
+            if (connected) {
+                statusEl.textContent = '● Connected';
+                statusEl.className = 'connection-status connected';
+            } else {
+                statusEl.textContent = '● Disconnected';
+                statusEl.className = 'connection-status disconnected';
+            }
+        }
+        
+        async function resetCounters() {
+            try {
+                const res = await fetch('/api/reset', { method: 'POST' });
+                const data = await res.json();
+                
+                if (data.success) {
+                    alert('Counters reset successfully');
+                    fetchStatus(); // Refresh immediately
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (e) {
+                alert('Error resetting counters: ' + e.message);
+            }
+        }
+        
+        // Initial fetch and start polling
+        fetchStatus();
+        setInterval(fetchStatus, POLL_INTERVAL);
+    </script>
+</body>
+</html>
+

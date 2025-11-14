@@ -1,9 +1,3 @@
-# eval_video_temporal_color.py
-"""
-Single video evaluator with temporal tracking and HSV color matching.
-Processes a video and outputs duration-based accuracy percentage.
-Uses HSV color masking to filter detections by pill color.
-"""
 import cv2
 import json
 import argparse
@@ -11,7 +5,6 @@ import numpy as np
 from pathlib import Path
 from collections import deque
 
-# Import core functions from count_pills_simple.py
 def load_quad(json_path, warp_w, warp_h):
     with open(json_path, "r") as f:
         pts = np.array(json.load(f)["points"], dtype=np.float32)
@@ -72,21 +65,7 @@ def preprocess_frame(frame_bgr, pre):
         gray = cv2.GaussianBlur(gray, (k, k), 0)
     return img, gray
 
-# ---------- HSV Color Masking Functions ----------
 def create_color_mask(warped_bgr, target_color_hsv, hue_tolerance=10, sat_range=(50, 255), val_range=(50, 255)):
-    """
-    Create a binary mask for specific color range in HSV space.
-    
-    Args:
-        warped_bgr: Input BGR image
-        target_color_hsv: Target color in HSV [H, S, V] (0-180, 0-255, 0-255)
-        hue_tolerance: Hue tolerance in degrees (0-180)
-        sat_range: Saturation range tuple (min, max) (0-255)
-        val_range: Value (brightness) range tuple (min, max) (0-255)
-    
-    Returns:
-        Binary mask (255 = match, 0 = no match)
-    """
     hsv = cv2.cvtColor(warped_bgr, cv2.COLOR_BGR2HSV)
     
     # Handle hue wrap-around (red is at both 0 and 180)
@@ -108,19 +87,6 @@ def create_color_mask(warped_bgr, target_color_hsv, hue_tolerance=10, sat_range=
     return mask
 
 def detect_with_color_mask(warped_bgr, gray_w, detector, cfg):
-    """
-    Detect pills using HSV color mask + blob detector.
-    
-    Args:
-        warped_bgr: Warped color image
-        gray_w: Warped grayscale image
-        detector: Blob detector
-        cfg: Configuration dictionary
-    
-    Returns:
-        keypoints: Detected keypoints
-        color_mask: Color mask used (for visualization)
-    """
     blob_cfg = cfg.get("blob", {})
     
     # Check if color filtering is enabled
@@ -153,7 +119,6 @@ def detect_with_color_mask(warped_bgr, gray_w, detector, cfg):
     return kps, color_mask
 
 class TemporalPillTracker:
-    """Tracks pill detections across multiple frames to stabilize counts."""
     def __init__(self, max_frames=30, cluster_distance=30.0, min_detection_ratio=0.3):
         self.max_frames = max(2, max_frames) if max_frames > 0 else 2
         self.cluster_distance = cluster_distance
@@ -267,12 +232,6 @@ def load_settings(path):
     return cfg
 
 def evaluate_video_with_visualization(video_path, cfg, show_vis=True):
-    """
-    Evaluate a single video with temporal tracking, HSV color matching, and optional visualization.
-    Uses binary scoring: checks if video ever reaches >=8 pills (not time-based).
-    Also tracks second utility: duration when exactly 8 pills are detected.
-    Returns binary score and statistics.
-    """
     warp_w = cfg["warp"]["width"]
     warp_h = cfg["warp"]["height"]
     M = None

@@ -1,8 +1,3 @@
-# count_pills_color.py
-"""
-Production pill counter with temporal tracking and HSV color matching.
-Detects pills in video/webcam feed and prints "OK" if 8 or more pills detected.
-"""
 import cv2
 import json
 import argparse
@@ -18,6 +13,13 @@ try:
 except ImportError:
     HARDWARE_AVAILABLE = False
     print("[WARNING] hardware.py not found, hardware control disabled")
+
+# Flask state integration
+try:
+    import app_state
+    APP_STATE_AVAILABLE = True
+except ImportError:
+    APP_STATE_AVAILABLE = False
 
 # Core functions
 def load_quad(json_path, warp_w, warp_h):
@@ -91,7 +93,6 @@ def preprocess_frame(frame_bgr, pre):
     return img, gray
 
 def create_color_mask(warped_bgr, target_color_hsv, hue_tolerance=10, sat_range=(50, 255), val_range=(50, 255)):
-    """Create a binary mask for specific color range in HSV space."""
     hsv = cv2.cvtColor(warped_bgr, cv2.COLOR_BGR2HSV)
     h_min = max(0, target_color_hsv[0] - hue_tolerance)
     h_max = min(180, target_color_hsv[0] + hue_tolerance)
@@ -100,7 +101,6 @@ def create_color_mask(warped_bgr, target_color_hsv, hue_tolerance=10, sat_range=
     return cv2.inRange(hsv, lower, upper)
 
 def detect_with_color_mask(warped_bgr, gray_w, detector, cfg):
-    """Detect pills using HSV color mask + blob detector."""
     blob_cfg = cfg.get("blob", {})
     
     if not blob_cfg.get("use_color_filter", False):
@@ -118,8 +118,7 @@ def detect_with_color_mask(warped_bgr, gray_w, detector, cfg):
     return kps
 
 class TemporalPillTracker:
-    """Tracks pill detections across multiple frames to stabilize counts."""
-    def __init__(self, max_frames=6, cluster_distance=38.0, min_detection_ratio=0.3):
+    def __init__(self, max_frames=4, cluster_distance=36.0, min_detection_ratio=0.320):
         self.max_frames = max(2, max_frames) if max_frames > 0 else 2
         self.cluster_distance = cluster_distance
         self.min_detection_ratio = min_detection_ratio
@@ -213,9 +212,9 @@ DEFAULTS = {
         "val_range": [35, 255]
     },
     "temporal": {
-        "max_frames": 6,
-        "cluster_distance": 38.0,
-        "min_detection_ratio": 0.3
+        "max_frames": 4,
+        "cluster_distance": 36.0,
+        "min_detection_ratio": 0.320
     }
 }
 
@@ -231,7 +230,6 @@ def load_settings(path):
     return cfg
 
 def _set_and_confirm(cap, prop, value, retries=3, delay=0.1):
-    """Set a camera property and retry a few times until it sticks."""
     for _ in range(retries):
         cap.set(prop, value)
         time.sleep(delay)
@@ -241,7 +239,6 @@ def _set_and_confirm(cap, prop, value, retries=3, delay=0.1):
     return False
 
 def set_cam_props(cap, width=1280, height=720, fps=30):
-    """Set camera properties to avoid flicker and ensure consistent capture."""
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
     cap.set(cv2.CAP_PROP_FPS, fps)
@@ -252,23 +249,10 @@ def set_cam_props(cap, width=1280, height=720, fps=30):
     _set_and_confirm(cap, cv2.CAP_PROP_WB_TEMPERATURE, 4500)
 
 def apply_current_settings(cap, exp, bright):
-    """Apply exposure and brightness settings to camera."""
     cap.set(cv2.CAP_PROP_EXPOSURE, exp)
     cap.set(cv2.CAP_PROP_BRIGHTNESS, bright)
 
 def count_pills(video_source, cfg, show_vis=False, enable_hardware=False):
-    """
-    Count pills in video/webcam feed.
-    
-    Args:
-        video_source: Video file path (str/Path) or camera index (int, typically 0)
-        cfg: Configuration dictionary
-        show_vis: Whether to show visualization window
-        enable_hardware: Whether to send commands to hardware actuators
-    
-    Returns:
-        bool: True if 8 or more pills detected, False otherwise
-    """
     warp_w = cfg["warp"]["width"]
     warp_h = cfg["warp"]["height"]
     M = None
@@ -279,21 +263,21 @@ def count_pills(video_source, cfg, show_vis=False, enable_hardware=False):
     
     temporal_params = cfg.get("temporal", {})
     tracker = TemporalPillTracker(
-        max_frames=temporal_params.get("max_frames", 6),
-        cluster_distance=temporal_params.get("cluster_distance", 38.0),
-        min_detection_ratio=temporal_params.get("min_detection_ratio", 0.3)
+        max_frames=temporal_params.get("max_frames", 4),
+        cluster_distance=temporal_params.get("cluster_distance", 36.0),
+        min_detection_ratio=temporal_params.get("min_detection_ratio", 0.320)
     )
     
     # Open video source (file or webcam)
-    # video_source is either an int (camera index) or Path (file path) from main()
     if isinstance(video_source, int):
-        # Camera index (same as vid2.py)
         cap = cv2.VideoCapture(video_source, cv2.CAP_ANY)
         is_webcam = True
     else:
         # File path
         cap = cv2.VideoCapture(str(video_source))
         is_webcam = False
+        # Disable zoom for video files
+        cfg["preprocess"]["zoom"] = 1.0
     
     if not cap.isOpened():
         print(f"ERROR: Cannot open video source: {video_source}")
@@ -309,6 +293,7 @@ def count_pills(video_source, cfg, show_vis=False, enable_hardware=False):
     
     ever_reached_8_plus = False
     previous_status = None  # Track status changes for hardware commands
+    last_stable_count = 0  # Track last count for final state update
     
     try:
         while True:
@@ -332,20 +317,47 @@ def count_pills(video_source, cfg, show_vis=False, enable_hardware=False):
             kps = detect_with_color_mask(warped, gray_w, detector, cfg)
             tracker.add_frame(kps)
             stable_count = tracker.get_stable_count()
+            last_stable_count = stable_count  # Track for final update
             
             # Check if threshold reached
             current_status = "OK" if stable_count >= 8 else "DEFECT"
             if stable_count >= 8:
                 ever_reached_8_plus = True
             
-            # Send hardware command when status changes (for webcam) or immediately (for video)
+            # Update app state with cycle-based logic (for Flask dashboard)
+            cycle_finalized_verdict = None
+            if APP_STATE_AVAILABLE:
+                # Create annotated frame for capture (with detection overlay)
+                capture_frame = None
+                if show_vis:
+                    # Use the visualization frame if available
+                    vis_copy = warped.copy()
+                    vis_copy = cv2.drawKeypoints(vis_copy, kps, None, (0, 255, 0), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+                    count_color = (0, 255, 0) if stable_count >= 8 else (0, 0, 255)
+                    cv2.putText(vis_copy, f"Pills: {stable_count}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, count_color, 2)
+                    capture_frame = vis_copy
+                else:
+                    # Use warped frame with basic annotation
+                    capture_frame = warped.copy()
+                    capture_frame = cv2.drawKeypoints(capture_frame, kps, None, (0, 255, 0), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+                    count_color = (0, 255, 0) if stable_count >= 8 else (0, 0, 255)
+                    cv2.putText(capture_frame, f"Count: {stable_count}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, count_color, 2)
+                
+                # Update with cycle logic (pass frame for image capture)
+                # Returns verdict ("OK", "DEFECT", or None) when cycle finalizes (count == 0)
+                cycle_finalized_verdict = app_state.update_with_cycle_logic(stable_count, capture_frame)
+            
+            # Send hardware command when cycle finalizes (count returns to 0)
+            # This uses cycle-based logic: only highest count matters
             if enable_hardware and HARDWARE_AVAILABLE:
-                if is_webcam:
-                    # For webcam: send command when status changes
-                    if current_status != previous_status:
-                        hardware.send_command(current_status)
-                        previous_status = current_status
-                # For video files: will send at the end
+                if cycle_finalized_verdict is not None:
+                    # Cycle just finalized - send command based on highest count in cycle
+                    hardware.send_command(cycle_finalized_verdict)
+                    print(f"[HARDWARE] Cycle finalized: {cycle_finalized_verdict} (based on highest count)")
+                    previous_status = cycle_finalized_verdict
+                elif stable_count > 0:
+                    # Update previous_status for tracking (but don't send command yet)
+                    previous_status = current_status
             
             # Visualization
             if show_vis:
@@ -356,8 +368,23 @@ def count_pills(video_source, cfg, show_vis=False, enable_hardware=False):
                 count_text = f"Pills: {stable_count}"
                 cv2.putText(vis, count_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, count_color, 2)
                 
-                status_text = "OK" if ever_reached_8_plus else "Checking..."
-                status_color = (0, 255, 0) if ever_reached_8_plus else (255, 255, 255)
+                # Use state's last_result if available (matches Flask dashboard), otherwise use legacy logic
+                if APP_STATE_AVAILABLE:
+                    state_dict = app_state.get_state_dict()
+                    status_text = state_dict.get('last_result', 'WAITING')
+                    # Map status to colors
+                    if status_text == "OK":
+                        status_color = (0, 255, 0)  # Green
+                    elif status_text == "DEFECT":
+                        status_color = (0, 0, 255)  # Red
+                    elif status_text == "WAITING":
+                        status_color = (255, 165, 0)  # Orange
+                    else:
+                        status_color = (255, 255, 255)  # White
+                else:
+                    # Legacy behavior for when app_state is not available
+                    status_text = "OK" if ever_reached_8_plus else "Checking..."
+                    status_color = (0, 255, 0) if ever_reached_8_plus else (255, 255, 255)
                 cv2.putText(vis, status_text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
                 
                 # Show camera settings if webcam
@@ -399,9 +426,11 @@ def count_pills(video_source, cfg, show_vis=False, enable_hardware=False):
     if enable_hardware and HARDWARE_AVAILABLE:
         final_status = "OK" if ever_reached_8_plus else "DEFECT"
         if not is_webcam or previous_status != final_status:
-            # For video files: always send at end
-            # For webcam: send if status changed or wasn't sent yet
             hardware.send_command(final_status)
+    
+    # Finalize any remaining cycle (for Flask dashboard)
+    if APP_STATE_AVAILABLE:
+        app_state.update_with_cycle_logic(0, None)
     
     return ever_reached_8_plus
 

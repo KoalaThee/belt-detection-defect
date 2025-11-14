@@ -14,3 +14,6 @@ tensorflow>=2.13.0
 
 # Hardware communication (for hardware.py)
 pyserial>=3.5
+
+# Flask web framework
+Flask>=3.0.0

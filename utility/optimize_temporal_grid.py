@@ -1,11 +1,3 @@
-# optimize_temporal_grid.py
-"""
-Parameter optimizer using grid search to find optimal temporal tracking parameters.
-Tests all combinations of max_frames, cluster_distance, and min_detection_ratio on OK/Defect videos.
-
-Grid search exhaustively tests all parameter combinations in the search space.
-Default configuration: ~210 combinations (5 × 6 × 7 parameter values).
-"""
 import cv2
 import json
 import argparse
@@ -14,7 +6,6 @@ from pathlib import Path
 from collections import deque
 from itertools import product
 
-# Import core functions from count_pills_simple.py
 def load_quad(json_path, warp_w, warp_h):
     with open(json_path, "r") as f:
         pts = np.array(json.load(f)["points"], dtype=np.float32)
@@ -76,7 +67,6 @@ def preprocess_frame(frame_bgr, pre):
     return img, gray
 
 class TemporalPillTracker:
-    """Tracks pill detections across multiple frames to stabilize counts."""
     def __init__(self, max_frames=30, cluster_distance=30.0, min_detection_ratio=0.3):
         self.max_frames = max(2, max_frames) if max_frames > 0 else 2
         self.cluster_distance = cluster_distance
@@ -149,21 +139,7 @@ class TemporalPillTracker:
         self.detection_history.clear()
         self.frame_counter = 0
 
-# ---------- HSV Color Masking Functions ----------
 def create_color_mask(warped_bgr, target_color_hsv, hue_tolerance=10, sat_range=(50, 255), val_range=(50, 255)):
-    """
-    Create a binary mask for specific color range in HSV space.
-    
-    Args:
-        warped_bgr: Input BGR image
-        target_color_hsv: Target color in HSV [H, S, V] (0-180, 0-255, 0-255)
-        hue_tolerance: Hue tolerance in degrees (0-180)
-        sat_range: Saturation range tuple (min, max) (0-255)
-        val_range: Value (brightness) range tuple (min, max) (0-255)
-    
-    Returns:
-        Binary mask (255 = match, 0 = no match)
-    """
     hsv = cv2.cvtColor(warped_bgr, cv2.COLOR_BGR2HSV)
     
     # Handle hue wrap-around (red is at both 0 and 180)
@@ -185,19 +161,6 @@ def create_color_mask(warped_bgr, target_color_hsv, hue_tolerance=10, sat_range=
     return mask
 
 def detect_with_color_mask(warped_bgr, gray_w, detector, cfg):
-    """
-    Detect pills using HSV color mask + blob detector.
-    
-    Args:
-        warped_bgr: Warped color image
-        gray_w: Warped grayscale image
-        detector: Blob detector
-        cfg: Configuration dictionary
-    
-    Returns:
-        keypoints: Detected keypoints
-        color_mask: Color mask used (for visualization), or None if not using color filter
-    """
     blob_cfg = cfg.get("blob", {})
     
     # Check if color filtering is enabled
@@ -263,7 +226,6 @@ def load_settings(path):
                 cfg[k] = user[k]
     return cfg
 
-# ---------- Expected Pill Counts (Ground Truth) ----------
 DEFECT_EXPECTED_COUNTS = {
     "clip_1762491325.mp4": 7,
     "clip_1762491458.mp4": 7,
@@ -290,26 +252,9 @@ DEFECT_EXPECTED_COUNTS = {
 
 OK_EXPECTED_COUNT = 8  # All OK videos should detect 8 pills
 
-# ---------- Evaluation Functions ----------
 def evaluate_video(video_path, cfg, max_frames, cluster_distance, min_detection_ratio, 
                    hue_tolerance=None, sat_range_min=None, val_range_min=None, show_vis=False, is_ok=True,
                    expected_count=None):
-    """
-    Evaluate a single video with given temporal parameters.
-    
-    Scoring based on maximum detected pills matching expected count:
-    - For OK videos: score 1.0 if max detected == 8, otherwise score based on closeness
-    - For Defect videos: score 1.0 if max detected == expected_count, otherwise score based on closeness
-    
-    Returns tuple (score, frames_with_exactly_expected):
-    - score: 0.0-1.0 (higher is better, 1.0 = perfect match)
-    - frames_with_exactly_expected: Count of frames where stable_count == expected_count (for tiebreaking)
-    
-    Args:
-        show_vis: If True, display video processing in real-time
-        is_ok: True for OK videos, False for Defect videos
-        expected_count: Expected number of pills for this video (None = use default: 8 for OK, lookup for Defect)
-    """
     warp_w = cfg["warp"]["width"]
     warp_h = cfg["warp"]["height"]
     M = None
@@ -463,18 +408,6 @@ def evaluate_video(video_path, cfg, max_frames, cluster_distance, min_detection_
 def evaluate_parameter_set(max_frames, cluster_distance, min_detection_ratio, cfg, ok_videos, defect_videos, 
                            hue_tolerance=None, sat_range_min=None, val_range_min=None, 
                            show_vis=False, iteration_num=None, total_iterations=None):
-    """
-    Evaluate a parameter set on all videos.
-    Returns score (0-1, higher is better):
-    - OK videos: score based on how close max detected is to 8
-    - Defect videos: score based on how close max detected is to expected count for each video
-    - Final score: average of all video scores (weighted: 50% OK, 50% Defect)
-    
-    Args:
-        show_vis: If True, show real-time video processing (only for first video of each type)
-        iteration_num: Current iteration number for progress display
-        total_iterations: Total number of iterations (for progress calculation)
-    """
     # Evaluate OK videos (should detect 8)
     ok_scores = []
     ok_frames_exactly_expected = []  # Track frames with exactly expected count for OK videos
@@ -514,13 +447,9 @@ def evaluate_parameter_set(max_frames, cluster_distance, min_detection_ratio, cf
             print(f"      → {status}, frames=={expected_count}: {frames_exactly_expected}")
     
     # Calculate composite score
-    # Both OK and Defect scores are already normalized (0-1, higher is better)
     avg_ok = np.mean(ok_scores) if ok_scores else 0.0
     avg_defect = np.mean(defect_scores) if defect_scores else 0.0
     
-    # Score: equal weighted combination
-    # OK weight: 0.5, Defect weight: 0.5 (equal importance)
-    # Both scores are already "higher is better", so no need to invert defect
     score = 0.5 * avg_ok + 0.5 * avg_defect
     
     # Calculate total frames with exactly expected count (for tiebreaking)
@@ -529,17 +458,7 @@ def evaluate_parameter_set(max_frames, cluster_distance, min_detection_ratio, cf
     
     return score, avg_ok, avg_defect, total_ok_frames_exactly_expected, total_defect_frames_exactly_expected
 
-# ---------- Grid Search ----------
 def generate_grid_points(step_sizes=None):
-    """
-    Generate grid points for temporal parameter search.
-    
-    Args:
-        step_sizes: Dictionary with step sizes for each parameter (optional)
-    
-    Returns:
-        List of parameter tuples (max_frames, cluster_distance, min_detection_ratio)
-    """
     if step_sizes is None:
         step_sizes = {}
     
@@ -587,17 +506,6 @@ def generate_grid_points(step_sizes=None):
 
 def optimize_parameters_grid(cfg, ok_videos, defect_videos, step_sizes=None, show_vis=False,
                              hue_tolerance=None, sat_range_min=None, val_range_min=None, target_color_hsv=None):
-    """
-    Use grid search to find optimal temporal parameters.
-    
-    Args:
-        show_vis: If True, show real-time video processing during optimization
-        step_sizes: Dictionary with step sizes for each parameter
-        hue_tolerance: Fixed hue tolerance for color mask (if None, color filtering disabled)
-        sat_range_min: Fixed saturation range minimum for color mask
-        val_range_min: Fixed value range minimum for color mask
-        target_color_hsv: Target HSV color [H, S, V] for color mask
-    """
     print(f"\n{'='*60}")
     print(f"Grid Search Optimization (Temporal Parameters Only)")
     print(f"{'='*60}")
@@ -650,15 +558,10 @@ def optimize_parameters_grid(cfg, ok_videos, defect_videos, step_sizes=None, sho
             show_vis=show_vis, iteration_num=iteration, total_iterations=total_iterations
         )
         
-        # Track best (use tiebreaker: prefer higher frames matching expected counts)
         is_best = False
         if score > best_score:
             is_best = True
         elif score == best_score and best_score == 1.0:
-            # Tiebreaker: when both achieve 100%, prefer:
-            # - Higher OK frames==expected (more stable at exactly expected for OK videos)
-            # - Higher Defect frames==expected (more stable at exactly expected for Defect videos)
-            # We'll compare using a combined metric: ok_frames + defect_frames
             current_tiebreaker = ok_frames_exactly_expected + defect_frames_exactly_expected
             best_tiebreaker = best_ok_frames_exactly_expected + best_defect_frames_exactly_expected
             if current_tiebreaker > best_tiebreaker:
@@ -707,7 +610,6 @@ def optimize_parameters_grid(cfg, ok_videos, defect_videos, step_sizes=None, sho
         "min_detection_ratio": best_params['min_detection_ratio']
     }
 
-# ---------- Main ----------
 def main():
     ap = argparse.ArgumentParser(description="Optimize temporal tracking parameters using grid search")
     ap.add_argument("--settings", default="", help="JSON settings file (for warp/preprocess/blob)")
