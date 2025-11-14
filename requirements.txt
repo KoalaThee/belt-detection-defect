@@ -12,3 +12,5 @@ scipy>=1.10.0
 # Deep learning (for patch classification in utility/)
 tensorflow>=2.13.0
 
+# Hardware communication (for hardware.py)
+pyserial>=3.5
