@@ -101,10 +101,29 @@ python utility/optimize_temporal_bayesian.py \
 
 ## Hardware Configuration
 
-Configure serial connection in your code:
+Configure serial connection in `hardware.py`:
 ```python
-pico = serial.Serial("COM3", 115200, timeout=1)
+SERIAL_PORT = "COM5"  # Change to your COM port
+BAUD_RATE = 115200
 ```
+
+## NetPIE Configuration (Optional)
+
+To enable NetPIE integration, copy `env.template` to `.env` and fill in your credentials:
+
+```bash
+# Windows
+copy env.template .env
+
+# Linux/Mac
+cp env.template .env
+```
+
+Edit `.env` with your NetPIE credentials:
+- **NETPIE_ENABLED**: Set to `True` to enable
+- **NETPIE_APP_ID**: Your NetPIE Application ID
+- **NETPIE_APP_KEY**: Your NetPIE Application Key
+- **NETPIE_APP_SECRET**: Your NetPIE Application Secret
 
 ## Requirements
 

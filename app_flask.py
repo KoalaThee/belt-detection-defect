@@ -1,4 +1,5 @@
 import logging
+import os
 import threading
 import time
 import argparse
@@ -17,6 +18,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# NetPIE integration (optional)
+try:
+    import netpie_client
+    NETPIE_AVAILABLE = True
+except ImportError:
+    NETPIE_AVAILABLE = False
+    logger.info("NetPIE integration not available (paho-mqtt not installed)")
+
 # Global detection thread reference
 _detection_thread = None
 _detection_running = False
@@ -28,6 +37,50 @@ def create_app(config_name='default', video_source_override=None):
     # Override video source if provided via command line
     if video_source_override is not None:
         app.config['VIDEO_SOURCE'] = video_source_override
+    
+    # Initialize NetPIE if enabled
+    # Skip initialization in Flask reloader parent process (WERKZEUG_RUN_MAIN is None in parent)
+    # Only initialize in the actual worker process
+    is_reloader_parent = os.environ.get('WERKZEUG_RUN_MAIN') is None
+    
+    if NETPIE_AVAILABLE and app.config.get('NETPIE_ENABLED'):
+        if is_reloader_parent:
+            logger.info("NetPIE: Skipping initialization in Flask reloader parent process")
+        else:
+            app_id = app.config.get('NETPIE_APP_ID')
+            app_key = app.config.get('NETPIE_APP_KEY')
+            app_secret = app.config.get('NETPIE_APP_SECRET')
+            
+            logger.info(f"NetPIE initialization check:")
+            logger.info(f"  NETPIE_AVAILABLE: {NETPIE_AVAILABLE}")
+            logger.info(f"  NETPIE_ENABLED: {app.config.get('NETPIE_ENABLED')}")
+            logger.info(f"  APP_ID present: {app_id is not None} (value: {'***' + app_id[-4:] if app_id and len(app_id) > 4 else 'None'})")
+            logger.info(f"  APP_KEY present: {app_key is not None} (value: {'***' + app_key[-4:] if app_key and len(app_key) > 4 else 'None'})")
+            logger.info(f"  APP_SECRET present: {app_secret is not None} (value: {'***' + app_secret[-4:] if app_secret and len(app_secret) > 4 else 'None'})")
+            
+            # Check if already connected to avoid re-initialization
+            if netpie_client.is_connected():
+                logger.info("NetPIE already connected, skipping re-initialization")
+            elif app_id and app_key and app_secret:
+                logger.info("All NetPIE credentials found, attempting connection...")
+                if netpie_client.initialize_netpie(app_id, app_key, app_secret):
+                    logger.info("NetPIE integration initialized successfully")
+                else:
+                    logger.error("Failed to initialize NetPIE integration - check credentials and network connection")
+            else:
+                missing = []
+                if not app_id:
+                    missing.append("NETPIE_APP_ID")
+                if not app_key:
+                    missing.append("NETPIE_APP_KEY")
+                if not app_secret:
+                    missing.append("NETPIE_APP_SECRET")
+                logger.error(f"NetPIE enabled but missing credentials: {', '.join(missing)}")
+                logger.error("Please check your .env file has all three values set correctly")
+    elif NETPIE_AVAILABLE and not is_reloader_parent:
+        logger.info("NetPIE available but not enabled (set NETPIE_ENABLED=True in .env)")
+    elif not NETPIE_AVAILABLE and not is_reloader_parent:
+        logger.info("NetPIE not available (paho-mqtt not installed)")
     
     # Register routes
     register_routes(app)
@@ -218,10 +271,19 @@ if __name__ == '__main__':
     
     # Development server
     config_obj = config_flask.config['default']
-    app.run(
-        host=config_obj.HOST,
-        port=config_obj.PORT,
-        debug=config_obj.DEBUG,
-        threaded=True
-    )
+    
+    try:
+        app.run(
+            host=config_obj.HOST,
+            port=config_obj.PORT,
+            debug=config_obj.DEBUG,
+            threaded=True
+        )
+    finally:
+        # Cleanup NetPIE connection on shutdown
+        if NETPIE_AVAILABLE:
+            try:
+                netpie_client.disconnect()
+            except Exception as e:
+                logger.error(f"Error disconnecting NetPIE: {e}")
 

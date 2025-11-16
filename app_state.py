@@ -6,6 +6,13 @@ import cv2
 import numpy as np
 from pathlib import Path
 
+# NetPIE integration (optional)
+try:
+    import netpie_client
+    NETPIE_AVAILABLE = True
+except ImportError:
+    NETPIE_AVAILABLE = False
+
 @dataclass
 class DetectionState:
     last_result: str = "WAITING"      # "OK", "DEFECT", "WAITING", "ERROR"
@@ -59,6 +66,17 @@ def update_with_cycle_logic(count: int, frame_image: Optional[np.ndarray] = None
             with _image_lock:
                 _highest_count_image = None
                 _state.has_image = False
+            
+            # Publish to NetPIE if available (when cycle finalizes)
+            if NETPIE_AVAILABLE:
+                try:
+                    state_dict = asdict(_state)
+                    state_dict['has_image'] = _state.has_image
+                    netpie_client.publish_defect_data(state_dict)
+                except Exception as e:
+                    # Don't fail if NetPIE publish fails
+                    pass
+            
             # Return verdict so caller can send hardware command
             return verdict
         
@@ -87,6 +105,17 @@ def update_with_cycle_logic(count: int, frame_image: Optional[np.ndarray] = None
             _state.last_result = "WAITING"
         
         _state.last_updated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Publish to NetPIE if available
+        if NETPIE_AVAILABLE:
+            try:
+                state_dict = asdict(_state)
+                state_dict['has_image'] = _state.has_image
+                netpie_client.publish_defect_data(state_dict)
+            except Exception as e:
+                # Don't fail if NetPIE publish fails
+                pass
+        
         return None  # No cycle finalized yet
 
 def finalize_cycle():

@@ -13,3 +13,6 @@ Thumbs.db
 *.log
 jupyter-*.json
 .ipynb_checkpoints/
+
+# Environment variables
+.env
