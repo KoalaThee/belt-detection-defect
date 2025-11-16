@@ -167,8 +167,20 @@ def publish_defect_data(state_dict: dict):
     """
     global _client, _connected
     
-    if not MQTT_AVAILABLE or _client is None or not _connected:
+    # Check prerequisites with detailed logging
+    if not MQTT_AVAILABLE:
+        logger.debug("NetPIE publish skipped: MQTT not available")
         return False
+    
+    if _client is None:
+        logger.debug("NetPIE publish skipped: Client is None")
+        return False
+    
+    if not _connected:
+        logger.debug("NetPIE publish skipped: Not connected (connection status: False)")
+        return False
+    
+    logger.debug(f"NetPIE publish: Client exists, connected={_connected}, attempting to publish...")
     
     try:
         # Prepare data payload for NetPIE widget
@@ -185,17 +197,35 @@ def publish_defect_data(state_dict: dict):
         # Convert to JSON
         json_payload = json.dumps(payload)
         
-        # Publish to NetPIE topic (@msg/ is the standard prefix for messages)
-        topic = "@msg/defect_detection"
-        result = _client.publish(topic, json_payload, qos=1)
+        # Publish to NetPIE topic
+        # Try both @msg/ and @shadow/ prefixes - NetPIE uses @shadow/ for shadow data
+        topics_to_try = [
+            "@shadow/data/update",  # Standard NetPIE shadow update topic
+            "@msg/defect_detection",  # Custom message topic
+        ]
         
-        if result.rc == MQTT_ERR_SUCCESS:
-            logger.info(f"Published defect data to NetPIE - Status: {payload['status']}, Count: {payload['last_count']}, Topic: {topic}")
-            logger.debug(f"Full payload: {payload}")
-            return True
-        else:
-            logger.warning(f"Failed to publish to NetPIE. Return code: {result.rc}")
-            return False
+        success = False
+        for topic in topics_to_try:
+            try:
+                # For @shadow/data/update, wrap payload in "data" field
+                if topic == "@shadow/data/update":
+                    shadow_payload = {"data": payload}
+                    json_payload_shadow = json.dumps(shadow_payload)
+                    result = _client.publish(topic, json_payload_shadow, qos=1)
+                else:
+                    result = _client.publish(topic, json_payload, qos=1)
+                
+                if result.rc == MQTT_ERR_SUCCESS:
+                    logger.info(f"Published defect data to NetPIE - Status: {payload['status']}, Count: {payload['last_count']}, Topic: {topic}")
+                    logger.debug(f"Full payload: {payload}")
+                    success = True
+                    # Don't break - try both topics
+                else:
+                    logger.warning(f"Failed to publish to NetPIE topic {topic}. Return code: {result.rc}")
+            except Exception as topic_error:
+                logger.warning(f"Error publishing to topic {topic}: {topic_error}")
+        
+        return success
             
     except Exception as e:
         logger.error(f"Error publishing to NetPIE: {e}")
@@ -228,5 +258,50 @@ def test_publish():
         "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "detection_running": True
     }
-    return publish_defect_data(test_data)
+    logger.info("Testing NetPIE publish with sample data...")
+    logger.info(f"Connection status: {_connected}, Client exists: {_client is not None}")
+    result = publish_defect_data(test_data)
+    if result:
+        logger.info("✓ Test publish successful!")
+    else:
+        logger.warning("✗ Test publish failed - check logs above for details")
+    return result
+
+def force_publish_test():
+    """Force publish a test message directly to @shadow/data/update for debugging."""
+    global _client, _connected
+    
+    if not _connected or _client is None:
+        logger.error("Cannot force publish: Not connected to NetPIE")
+        return False
+    
+    test_payload = {
+        "data": {
+            "status": "TEST",
+            "last_count": 99,
+            "total_ok": 1,
+            "total_defect": 1,
+            "highest_count": 99,
+            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "detection_running": True,
+            "test": True
+        }
+    }
+    
+    try:
+        topic = "@shadow/data/update"
+        json_payload = json.dumps(test_payload)
+        logger.info(f"Force publishing test data to {topic}...")
+        logger.info(f"Payload: {json_payload}")
+        result = _client.publish(topic, json_payload, qos=1)
+        
+        if result.rc == MQTT_ERR_SUCCESS:
+            logger.info(f"✓ Force publish successful! Check NetPIE shadow in a few seconds.")
+            return True
+        else:
+            logger.error(f"✗ Force publish failed. Return code: {result.rc}")
+            return False
+    except Exception as e:
+        logger.error(f"✗ Force publish error: {e}")
+        return False
 

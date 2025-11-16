@@ -5,6 +5,9 @@ from typing import Optional
 import cv2
 import numpy as np
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 # NetPIE integration (optional)
 try:
@@ -72,10 +75,12 @@ def update_with_cycle_logic(count: int, frame_image: Optional[np.ndarray] = None
                 try:
                     state_dict = asdict(_state)
                     state_dict['has_image'] = _state.has_image
-                    netpie_client.publish_defect_data(state_dict)
+                    result = netpie_client.publish_defect_data(state_dict)
+                    if not result:
+                        logger.debug(f"NetPIE publish returned False when cycle finalized")
                 except Exception as e:
-                    # Don't fail if NetPIE publish fails
-                    pass
+                    # Log error but don't fail detection
+                    logger.warning(f"Error publishing to NetPIE when cycle finalized: {e}")
             
             # Return verdict so caller can send hardware command
             return verdict
@@ -111,10 +116,12 @@ def update_with_cycle_logic(count: int, frame_image: Optional[np.ndarray] = None
             try:
                 state_dict = asdict(_state)
                 state_dict['has_image'] = _state.has_image
-                netpie_client.publish_defect_data(state_dict)
+                result = netpie_client.publish_defect_data(state_dict)
+                if not result:
+                    logger.debug(f"NetPIE publish returned False - connection may not be ready")
             except Exception as e:
-                # Don't fail if NetPIE publish fails
-                pass
+                # Log error but don't fail detection
+                logger.warning(f"Error publishing to NetPIE: {e}")
         
         return None  # No cycle finalized yet
 
