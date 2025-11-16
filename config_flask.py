@@ -53,9 +53,8 @@ class Config:
     # API settings
     API_POLL_INTERVAL = 1000  # milliseconds for dashboard polling
     
-    # NetPIE MQTT integration (optional)
-    _netpie_enabled_raw = os.environ.get('NETPIE_ENABLED', 'False')
-    NETPIE_ENABLED = _netpie_enabled_raw.lower().strip() == 'true'
+    # NetPIE MQTT integration (always enabled)
+    NETPIE_ENABLED = True  # Always enabled
     
     _app_id_raw = os.environ.get('NETPIE_APP_ID')
     NETPIE_APP_ID = _app_id_raw.strip() if _app_id_raw else None
@@ -67,15 +66,12 @@ class Config:
     NETPIE_APP_SECRET = _app_secret_raw.strip() if _app_secret_raw else None
     
     # Debug logging (only log if enabled to avoid exposing secrets)
-    if NETPIE_ENABLED:
-        logger.info(f"NetPIE enabled: {NETPIE_ENABLED}")
-        logger.info(f"NetPIE APP_ID present: {NETPIE_APP_ID is not None} (length: {len(NETPIE_APP_ID) if NETPIE_APP_ID else 0})")
-        logger.info(f"NetPIE APP_KEY present: {NETPIE_APP_KEY is not None} (length: {len(NETPIE_APP_KEY) if NETPIE_APP_KEY else 0})")
-        logger.info(f"NetPIE APP_SECRET present: {NETPIE_APP_SECRET is not None} (length: {len(NETPIE_APP_SECRET) if NETPIE_APP_SECRET else 0})")
-        if not all([NETPIE_APP_ID, NETPIE_APP_KEY, NETPIE_APP_SECRET]):
-            logger.warning("NetPIE is enabled but one or more credentials are missing!")
-    else:
-        logger.debug(f"NetPIE disabled (NETPIE_ENABLED={_netpie_enabled_raw})")
+    logger.info(f"NetPIE enabled: {NETPIE_ENABLED}")
+    logger.info(f"NetPIE APP_ID present: {NETPIE_APP_ID is not None} (length: {len(NETPIE_APP_ID) if NETPIE_APP_ID else 0})")
+    logger.info(f"NetPIE APP_KEY present: {NETPIE_APP_KEY is not None} (length: {len(NETPIE_APP_KEY) if NETPIE_APP_KEY else 0})")
+    logger.info(f"NetPIE APP_SECRET present: {NETPIE_APP_SECRET is not None} (length: {len(NETPIE_APP_SECRET) if NETPIE_APP_SECRET else 0})")
+    if not all([NETPIE_APP_ID, NETPIE_APP_KEY, NETPIE_APP_SECRET]):
+        logger.warning("NetPIE is enabled but one or more credentials are missing!")
 
 class DevelopmentConfig(Config):
     DEBUG = True

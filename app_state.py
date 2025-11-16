@@ -50,7 +50,6 @@ def update_with_cycle_logic(count: int, frame_image: Optional[np.ndarray] = None
             _state.last_updated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             return
         
-        _state.last_count = int(count)
         _state.error_message = None
         
         # Reset cycle when count becomes 0 (pill has passed)
@@ -70,12 +69,13 @@ def update_with_cycle_logic(count: int, frame_image: Optional[np.ndarray] = None
                 _highest_count_image = None
                 _state.has_image = False
             
-            # Publish to NetPIE if available (when cycle finalizes)
+            # Publish to NetPIE if available (when cycle finalizes) - use real-time for final verdict
             if NETPIE_AVAILABLE:
                 try:
                     state_dict = asdict(_state)
                     state_dict['has_image'] = _state.has_image
-                    result = netpie_client.publish_defect_data(state_dict)
+                    # Cycle finalized is important - publish immediately
+                    result = netpie_client.publish_realtime_update(state_dict)
                     if not result:
                         logger.debug(f"NetPIE publish returned False when cycle finalized")
                 except Exception as e:
@@ -101,7 +101,12 @@ def update_with_cycle_logic(count: int, frame_image: Optional[np.ndarray] = None
                 except Exception as e:
                     print(f"[WARNING] Failed to capture image: {e}")
         
-        # Update current status based on count
+        # Track previous status and count to detect changes
+        previous_status = _state.last_result
+        previous_count = _state.last_count
+        
+        # Update current count and status
+        _state.last_count = int(count)
         if count >= 8:
             _state.last_result = "OK"
         elif count >= 1:
@@ -111,12 +116,23 @@ def update_with_cycle_logic(count: int, frame_image: Optional[np.ndarray] = None
         
         _state.last_updated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        # Publish to NetPIE if available
+        # Publish to NetPIE if available - use real-time for status changes
         if NETPIE_AVAILABLE:
             try:
                 state_dict = asdict(_state)
                 state_dict['has_image'] = _state.has_image
-                result = netpie_client.publish_defect_data(state_dict)
+                
+                # Use real-time publish if status changed or count changed
+                status_changed = previous_status != _state.last_result
+                count_changed = previous_count != _state.last_count
+                
+                if status_changed or count_changed:
+                    # Critical change - publish immediately in real-time
+                    result = netpie_client.publish_realtime_update(state_dict)
+                else:
+                    # No change - skip publish to avoid spam (heartbeat will handle regular updates)
+                    result = True
+                
                 if not result:
                     logger.debug(f"NetPIE publish returned False - connection may not be ready")
             except Exception as e:
