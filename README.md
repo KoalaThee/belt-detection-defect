@@ -1,16 +1,28 @@
 # **Pill Counting & Defect Detection System**
 
-A computer-vision pill counting and defect detection pipeline for conveyor-belt inspection.  
+A **computer-vision pill counting** and **defect detection pipeline** for pill on conveyor-belt connected to camera, Raspberry Pi Pico and pneumatic actuator.  
 The system performs HSV-based pill detection, temporal tracking, hardware actuation via Raspberry Pi Pico, and optional web dashboard visualization.
 
+<p align="center">
+  <img src="https://github.com/KoalaThee/belt-detection-defect/blob/a404f017c6358e981516cc83a9556a3eec1fdaf1/resources/pico%20and%20hardware.png" width="400" alt="Architectural Diagram"/>
+</p>
+<p align="center"><i><b>Figure 1:</b> Mechanical System Set Up</i></p>
 
-# **Information**
+# **Codebase Information**
 
-This system improves accuracy in high-speed pill inspection using **color segmentation**, **temporal analysis**, and **hardware integration**. Compared to traditional systems that rely only on thresholding or single-frame detection, this project focuses on **robust real-time tracking**, synchronized with **physical actuation** for defect removal.
+This system improves accuracy in high-speed pill inspection using **color segmentation**, **temporal analysis**, and **hardware integration**. Compared to traditional systems that rely only on thresholding or single-frame detection, this project focuses on **robust real-time tracking**, synchronized with **physical actuation** for defect removal. It also has a web application to display detection status, count and real-time detected images.
 
-## **Why This System?**
+<p align="center">
+  <img src="https://github.com/KoalaThee/belt-detection-defect/blob/a404f017c6358e981516cc83a9556a3eec1fdaf1/resources/defect%20detection%20interface.png" width="700" alt="Architectural Diagram"/>
+</p>
+<p align="center"><i><b>Figure 2:</b> GUI Displaying DEFECT Pill Detection </i></p>
 
-### **Unique Features**
+<p align="center">
+  <img src="https://github.com/KoalaThee/belt-detection-defect/blob/a404f017c6358e981516cc83a9556a3eec1fdaf1/resources/ok%20detection%20interface.png" width="700" alt="Architectural Diagram"/>
+</p>
+<p align="center"><i><b>Figure 3:</b> GUI Displaying OK Pill Detection </i></p>
+
+## **Unique Features**
 1. **Accurate Color-Based Detection**  
    HSV segmentation tuned for bright yellow pills.
 2. **Temporal Tracking for Stability**  
@@ -21,12 +33,6 @@ This system improves accuracy in high-speed pill inspection using **color segmen
    Live updates of detection, results, counts, and system status.
 5. **Calibration Tools & Parameter Optimizers**  
    Includes quad calibration, grid search, and Bayesian optimization.
-
-### **What Other Systems Miss**
-- Single-frame detection produces unstable counts  
-- No hardware-actuated removal workflow  
-- Limited support for parameter optimization  
-- No synchronized real-time web interface  
 
 <br>
 
